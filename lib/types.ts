@@ -1,8 +1,17 @@
 import type { ModelKey } from "./models";
 
+export interface Folder {
+  id: string;
+  name: string;
+  parentId: string | null;
+  createdAt: number;
+  sortOrder: number;
+}
+
 export interface Chat {
   id: string;
   title: string;
+  folderId: string | null;
   createdAt: number;
 }
 
@@ -77,6 +86,7 @@ export interface ThreadData {
 
 export interface AppData {
   chats: Chat[];
+  folders: Folder[];
   current: ChatData | null;
 }
 

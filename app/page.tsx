@@ -10,8 +10,9 @@ export default async function Page({ searchParams }: { searchParams: Promise<{ c
   const params = await searchParams;
   const repository = getRepository();
   const chats = repository.listChats();
+  const folders = repository.listFolders();
   const chat = chats.find((item) => item.id === params.chat) ?? chats[0];
   const current = chat ? { chat, messages: repository.listMessages(chat.id), threads: repository.listThreads(chat.id) } : null;
   const initialThread = params.thread && current?.threads.some((thread) => thread.id === params.thread) ? getThreadData(params.thread) : null;
-  return <ChatApp initialData={{ chats, current }} initialThread={initialThread} providerStatus={getProviderStatus()} />;
+  return <ChatApp initialData={{ chats, folders, current }} initialThread={initialThread} providerStatus={getProviderStatus()} />;
 }

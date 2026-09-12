@@ -4,9 +4,9 @@ import { alias } from "drizzle-orm/sqlite-core";
 import { validateAnchor } from "../anchors";
 import { AppError } from "../errors";
 import { isModelKey } from "../models";
-import type { Chat, Message, SearchResult, Thread } from "../types";
+import type { Chat, Folder, Message, SearchResult, Thread } from "../types";
 import { DEFAULT_DATABASE_PATH, openDatabase, type AppDatabase } from "./database";
-import { chats, messages, threads } from "./schema";
+import { chats, folders, messages, threads } from "./schema";
 
 export type AppendMessageInput = Pick<Message, "chatId" | "threadId" | "role" | "content" | "modelKey">
   & Partial<Pick<Message, "complete" | "createdAt">>;
@@ -80,6 +80,52 @@ export class ChatRepository {
     if (repositoryGlobal.__threadllmRepository === this) {
       delete repositoryGlobal.__threadllmRepository;
     }
+  }
+
+  listFolders(): Folder[] {
+    return this.db.select().from(folders).orderBy(asc(folders.parentId), asc(folders.sortOrder), asc(folders.createdAt)).all();
+  }
+
+  createFolder(name: string, parentId: string | null = null): Folder {
+    if (typeof name !== "string" || name.trim().length === 0) throw new AppError("Folder name must not be empty.");
+    if (parentId !== null) {
+      const parent = this.db.select({ id: folders.id }).from(folders).where(eq(folders.id, parentId)).get();
+      if (!parent) throw new AppError("Parent folder not found.", 404, "folder_not_found");
+    }
+    return this.db.insert(folders).values({
+      id: randomUUID(),
+      name: name.trim(),
+      parentId,
+      createdAt: Date.now(),
+      sortOrder: 0,
+    }).returning().get()!;
+  }
+
+  renameFolder(id: string, name: string): Folder {
+    if (typeof name !== "string" || name.trim().length === 0) throw new AppError("Folder name must not be empty.");
+    const existing = this.db.select().from(folders).where(eq(folders.id, id)).get();
+    if (!existing) throw new AppError("Folder not found.", 404, "folder_not_found");
+    return this.db.update(folders).set({ name: name.trim() }).where(eq(folders.id, id)).returning().get()!;
+  }
+
+  deleteFolder(id: string): void {
+    this.db.delete(folders).where(eq(folders.id, id)).run();
+  }
+
+  renameChat(chatId: string, title: string): Chat {
+    const trimmed = title.trim();
+    if (!trimmed) throw new AppError("Title must not be empty.");
+    return this.db.update(chats).set({ title: trimmed }).where(eq(chats.id, chatId)).returning().get()!;
+  }
+
+  moveChat(chatId: string, folderId: string | null): Chat {
+    const chat = this.db.select().from(chats).where(eq(chats.id, chatId)).get();
+    if (!chat) throw new AppError("Chat not found.", 404, "chat_not_found");
+    if (folderId !== null) {
+      const folder = this.db.select({ id: folders.id }).from(folders).where(eq(folders.id, folderId)).get();
+      if (!folder) throw new AppError("Folder not found.", 404, "folder_not_found");
+    }
+    return this.db.update(chats).set({ folderId }).where(eq(chats.id, chatId)).returning().get()!;
   }
 
   listChats(): Chat[] {

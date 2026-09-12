@@ -2,12 +2,25 @@ import { sql } from "drizzle-orm";
 import { check, index, integer, sqliteTable, text, type AnySQLiteColumn } from "drizzle-orm/sqlite-core";
 import type { ModelKey } from "../models";
 
+export const folders = sqliteTable("folders", {
+  id: text("id").primaryKey(),
+  name: text("name").notNull(),
+  parentId: text("parent_id").references((): AnySQLiteColumn => folders.id, { onDelete: "cascade" }),
+  createdAt: integer("created_at").notNull(),
+  sortOrder: integer("sort_order").notNull().default(0),
+}, (table) => [
+  index("folders_parent_sort_idx").on(table.parentId, table.sortOrder),
+  check("folders_name_nonempty", sql`length(${table.name}) > 0`),
+]);
+
 export const chats = sqliteTable("chats", {
   id: text("id").primaryKey(),
   title: text("title").notNull(),
+  folderId: text("folder_id").references(() => folders.id, { onDelete: "set null" }),
   createdAt: integer("created_at").notNull(),
 }, (table) => [
   index("chats_created_at_idx").on(table.createdAt),
+  index("chats_folder_id_idx").on(table.folderId),
 ]);
 
 export const messages = sqliteTable("messages", {

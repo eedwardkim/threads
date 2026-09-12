@@ -318,6 +318,81 @@ describe("ChatRepository", () => {
     repository.close();
     expect(() => repository.close()).not.toThrow();
   });
+
+  describe("folders", () => {
+    it("creates, lists, renames, and deletes folders", () => {
+      const folder = repository.createFolder("Work");
+      expect(folder).toMatchObject({ name: "Work", parentId: null, sortOrder: 0 });
+      expect(folder.id).toBeTruthy();
+      expect(repository.listFolders()).toEqual([folder]);
+
+      const renamed = repository.renameFolder(folder.id, "Projects");
+      expect(renamed.name).toBe("Projects");
+      expect(repository.listFolders()).toEqual([renamed]);
+
+      repository.deleteFolder(folder.id);
+      expect(repository.listFolders()).toEqual([]);
+    });
+
+    it("supports nested folders and cascades deletion to children", () => {
+      const parent = repository.createFolder("Parent");
+      const child = repository.createFolder("Child", parent.id);
+      expect(child.parentId).toBe(parent.id);
+      expect(repository.listFolders()).toHaveLength(2);
+
+      repository.deleteFolder(parent.id);
+      expect(repository.listFolders()).toEqual([]);
+    });
+
+    it("rejects empty folder names", () => {
+      expect(() => repository.createFolder("")).toThrow(AppError);
+      expect(() => repository.createFolder("   ")).toThrow(AppError);
+      const folder = repository.createFolder("Valid");
+      expect(() => repository.renameFolder(folder.id, "")).toThrow(AppError);
+    });
+
+    it("rejects creating a folder under a nonexistent parent", () => {
+      expect(() => repository.createFolder("Orphan", "nonexistent")).toThrow(AppError);
+    });
+
+    it("rejects renaming a nonexistent folder", () => {
+      expect(() => repository.renameFolder("nonexistent", "Name")).toThrow(AppError);
+    });
+  });
+
+  describe("moveChat", () => {
+    it("moves a chat into a folder and back to unsorted", () => {
+      const chat = repository.createChat();
+      const folder = repository.createFolder("Work");
+      expect(chat.folderId).toBeNull();
+
+      const moved = repository.moveChat(chat.id, folder.id);
+      expect(moved.folderId).toBe(folder.id);
+      expect(repository.getChat(chat.id)?.folderId).toBe(folder.id);
+
+      const unsorted = repository.moveChat(chat.id, null);
+      expect(unsorted.folderId).toBeNull();
+    });
+
+    it("unfiles chats when their folder is deleted (ON DELETE SET NULL)", () => {
+      const folder = repository.createFolder("Temp");
+      const chat = repository.createChat();
+      repository.moveChat(chat.id, folder.id);
+      expect(repository.getChat(chat.id)?.folderId).toBe(folder.id);
+
+      repository.deleteFolder(folder.id);
+      expect(repository.getChat(chat.id)?.folderId).toBeNull();
+    });
+
+    it("rejects moving a nonexistent chat", () => {
+      expect(() => repository.moveChat("nonexistent", null)).toThrow(AppError);
+    });
+
+    it("rejects moving a chat to a nonexistent folder", () => {
+      const chat = repository.createChat();
+      expect(() => repository.moveChat(chat.id, "nonexistent")).toThrow(AppError);
+    });
+  });
 });
 
 describe("database initialization", () => {
@@ -327,6 +402,8 @@ describe("database initialization", () => {
       expect(sqlite.pragma("user_version", { simple: true })).toBe(SCHEMA_VERSION);
       expect(sqlite.pragma("foreign_keys", { simple: true })).toBe(1);
       expect(sqlite.pragma("journal_mode", { simple: true })).toBe("memory");
+      const chatColumns = sqlite.pragma("table_info(chats)") as { name: string }[];
+      expect(chatColumns.map((column) => column.name)).toContain("folder_id");
       const columns = sqlite.pragma("table_info(messages)") as { name: string }[];
       expect(columns.map((column) => column.name)).toEqual(["id", "chat_id", "thread_id", "role", "content", "model_key", "complete", "input_tokens", "output_tokens", "created_at"]);
       expect(() => db.insert(messages).values({ id: "orphan", chatId: "missing", threadId: null, role: "user", content: "Orphan", modelKey: null, complete: true, createdAt: 1 }).run()).toThrow();

@@ -1,12 +1,124 @@
 "use client";
 
-import { Check, Database, MessageSquare, Moon, Plus, Search, Sun, TextQuote, Trash2, X } from "lucide-react";
-import type { Chat, Thread } from "@/lib/types";
+import { useState, useRef, useEffect } from "react";
+import { Check, ChevronRight, Database, EllipsisVertical, FolderIcon, FolderInput, FolderPlus, MessageSquare, Moon, Pencil, Plus, Search, Sun, TextQuote, Trash2, X } from "lucide-react";
+import type { Chat, Folder, Thread } from "@/lib/types";
 import { Button } from "./ui/button";
 import { Logo } from "./logo";
 
-export function Sidebar({ chats, currentChatId, threads, activeThreadId, onChat, onNewChat, onOpenThread, onDeleteChat, mobileOpen, onCloseMobile, theme, onToggleTheme, locked, searchOpen, onSearch, onSwitcher, children }: {
+function FolderNode({ folder, folders, chats, currentChatId, onChat, onDeleteChat, onMoveChat, onRenameChat, onRenameFolder, onDeleteFolder, locked }: {
+  folder: Folder;
+  folders: Folder[];
   chats: Chat[];
+  currentChatId: string | null;
+  onChat: (id: string) => void;
+  onDeleteChat: (chat: Chat) => void;
+  onMoveChat: (chatId: string) => void;
+  onRenameChat: (id: string, title: string) => void;
+  onRenameFolder: (id: string, name: string) => void;
+  onDeleteFolder: (id: string) => void;
+  locked: boolean;
+}) {
+  const [expanded, setExpanded] = useState(true);
+  const [editing, setEditing] = useState(false);
+  const [editName, setEditName] = useState(folder.name);
+  const inputRef = useRef<HTMLInputElement>(null);
+  const children = folders.filter((f) => f.parentId === folder.id);
+  const folderChats = chats.filter((c) => c.folderId === folder.id);
+
+  useEffect(() => {
+    if (editing) inputRef.current?.select();
+  }, [editing]);
+
+  function commitRename() {
+    const trimmed = editName.trim();
+    if (trimmed && trimmed !== folder.name) onRenameFolder(folder.id, trimmed);
+    else setEditName(folder.name);
+    setEditing(false);
+  }
+
+  return <div className="folder-node">
+    <div className="folder-row">
+      <button className="folder-toggle" onClick={() => setExpanded(!expanded)} aria-label={expanded ? "Collapse folder" : "Expand folder"}>
+        <ChevronRight size={12} className={`folder-chevron${expanded ? " is-expanded" : ""}`} />
+      </button>
+      {editing
+        ? <input ref={inputRef} className="folder-rename-input" value={editName} onChange={(e) => setEditName(e.target.value)} onBlur={commitRename} onKeyDown={(e) => { if (e.key === "Enter") commitRename(); if (e.key === "Escape") { setEditName(folder.name); setEditing(false); } }} />
+        : <button className="folder-label" onClick={() => setExpanded(!expanded)}><FolderIcon size={14} /><span>{folder.name}</span></button>
+      }
+      <div className="folder-actions">
+        <Button variant="ghost" size="icon" className="folder-action-button" aria-label="Rename folder" title="Rename folder" onClick={() => { setEditName(folder.name); setEditing(true); }}><Pencil size={11} /></Button>
+        <Button variant="ghost" size="icon" className="folder-action-button" aria-label="Delete folder" title="Delete folder" onClick={() => onDeleteFolder(folder.id)}><Trash2 size={11} /></Button>
+      </div>
+    </div>
+    {expanded && <div className="folder-children">
+      {children.map((child) => <FolderNode key={child.id} folder={child} folders={folders} chats={chats} currentChatId={currentChatId} onChat={onChat} onDeleteChat={onDeleteChat} onMoveChat={onMoveChat} onRenameChat={onRenameChat} onRenameFolder={onRenameFolder} onDeleteFolder={onDeleteFolder} locked={locked} />)}
+      {folderChats.map((chat) => <ChatRow key={chat.id} chat={chat} currentChatId={currentChatId} onChat={onChat} onDeleteChat={onDeleteChat} onMoveChat={onMoveChat} onRenameChat={onRenameChat} locked={locked} />)}
+      {!children.length && !folderChats.length && <div className="folder-empty">Empty</div>}
+    </div>}
+  </div>;
+}
+
+function ChatRow({ chat, currentChatId, onChat, onDeleteChat, onMoveChat, onRenameChat, locked }: {
+  chat: Chat;
+  currentChatId: string | null;
+  onChat: (id: string) => void;
+  onDeleteChat: (chat: Chat) => void;
+  onMoveChat: (chatId: string) => void;
+  onRenameChat: (id: string, title: string) => void;
+  locked: boolean;
+}) {
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [editing, setEditing] = useState(false);
+  const [editTitle, setEditTitle] = useState(chat.title);
+  const menuRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (!menuOpen) return;
+    const close = (e: MouseEvent) => {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) setMenuOpen(false);
+    };
+    const key = (e: KeyboardEvent) => {
+      if (e.key === "Escape") { setMenuOpen(false); return; }
+      if (e.key.toLowerCase() === "r") { e.preventDefault(); setMenuOpen(false); setEditTitle(chat.title); setEditing(true); }
+      if (e.key.toLowerCase() === "d" && !locked) { e.preventDefault(); setMenuOpen(false); onDeleteChat(chat); }
+    };
+    document.addEventListener("mousedown", close);
+    document.addEventListener("keydown", key);
+    return () => { document.removeEventListener("mousedown", close); document.removeEventListener("keydown", key); };
+  }, [menuOpen, chat, locked, onDeleteChat]);
+
+  useEffect(() => {
+    if (editing) inputRef.current?.select();
+  }, [editing]);
+
+  function commitRename() {
+    const trimmed = editTitle.trim();
+    if (trimmed && trimmed !== chat.title) onRenameChat(chat.id, trimmed);
+    setEditing(false);
+  }
+
+  return <div className={`chat-list-row${currentChatId === chat.id ? " is-current" : ""}`}>
+    {editing
+      ? <input ref={inputRef} className="chat-rename-input" value={editTitle} onChange={(e) => setEditTitle(e.target.value)} onBlur={commitRename} onKeyDown={(e) => { if (e.key === "Enter") commitRename(); if (e.key === "Escape") { setEditTitle(chat.title); setEditing(false); } }} />
+      : <button className="chat-link" aria-current={currentChatId === chat.id ? "page" : undefined} onClick={() => onChat(chat.id)}><MessageSquare size={15} /><span>{chat.title}</span></button>
+    }
+    <div className="chat-menu-wrap" ref={menuRef}>
+      <button className="chat-menu-trigger" aria-label="Chat options" onClick={() => setMenuOpen(!menuOpen)}><EllipsisVertical size={13} /></button>
+      {menuOpen && <div className="chat-context-menu">
+        <button onClick={() => { setMenuOpen(false); setEditTitle(chat.title); setEditing(true); }}><Pencil size={13} /><span>Rename</span><kbd>R</kbd></button>
+        <button onClick={() => { setMenuOpen(false); onMoveChat(chat.id); }}><FolderInput size={13} /><span>Add to folder</span></button>
+        <hr />
+        <button className="destructive" disabled={locked} onClick={() => { setMenuOpen(false); onDeleteChat(chat); }}><Trash2 size={13} /><span>Delete</span><kbd>D</kbd></button>
+      </div>}
+    </div>
+  </div>;
+}
+
+export function Sidebar({ chats, folders, currentChatId, threads, activeThreadId, onChat, onNewChat, onOpenThread, onDeleteChat, onMoveChat, onRenameChat, onCreateFolder, onRenameFolder, onDeleteFolder, mobileOpen, onCloseMobile, theme, onToggleTheme, locked, searchOpen, onSearch, onSwitcher, children }: {
+  chats: Chat[];
+  folders: Folder[];
   currentChatId: string | null;
   threads: Thread[];
   activeThreadId?: string | null;
@@ -14,6 +126,11 @@ export function Sidebar({ chats, currentChatId, threads, activeThreadId, onChat,
   onNewChat: () => void;
   onOpenThread?: (id: string) => void;
   onDeleteChat: (chat: Chat) => void;
+  onMoveChat: (chatId: string) => void;
+  onRenameChat: (id: string, title: string) => void;
+  onCreateFolder: () => void;
+  onRenameFolder: (id: string, name: string) => void;
+  onDeleteFolder: (id: string) => void;
   mobileOpen: boolean;
   onCloseMobile: () => void;
   theme: string;
@@ -24,6 +141,9 @@ export function Sidebar({ chats, currentChatId, threads, activeThreadId, onChat,
   onSwitcher: () => void;
   children?: React.ReactNode;
 }) {
+  const rootFolders = folders.filter((f) => f.parentId === null);
+  const unsortedChats = chats.filter((c) => c.folderId === null);
+
   return <>
     {mobileOpen && <button className="sidebar-scrim" aria-label="Close navigation" onClick={onCloseMobile} />}
     <aside className={`sidebar${mobileOpen ? " is-open" : ""}`} aria-label="Conversations and threads">
@@ -32,11 +152,11 @@ export function Sidebar({ chats, currentChatId, threads, activeThreadId, onChat,
       {children}
       <div className="sidebar-scroll" hidden={searchOpen}>
         <section className="sidebar-section" aria-label="Chat list">
-          <h2>Conversations<button className="switcher-shortcut" aria-label="Switch conversation" title="Switch conversation (⌘K)" onClick={onSwitcher}>⌘ K</button></h2>
-          <div className="chat-list">{chats.map((chat) => <div key={chat.id} className={`chat-list-row${currentChatId === chat.id ? " is-current" : ""}`}>
-            <button className="chat-link" aria-current={currentChatId === chat.id ? "page" : undefined} onClick={() => onChat(chat.id)}><MessageSquare size={15} /><span>{chat.title}</span></button>
-            <Button variant="ghost" size="icon" className="delete-chat-button" aria-label={`Delete chat: ${chat.title}`} title="Delete chat" disabled={locked} onClick={() => onDeleteChat(chat)}><Trash2 size={13} /></Button>
-          </div>)}</div>
+          <h2>Conversations<span className="conversations-actions"><Button variant="ghost" size="icon" className="new-folder-button" aria-label="New folder" title="New folder" onClick={onCreateFolder}><FolderPlus size={13} /></Button><button className="switcher-shortcut" aria-label="Switch conversation" title="Switch conversation (⌘K)" onClick={onSwitcher}>⌘ K</button></span></h2>
+          <div className="chat-list">
+            {rootFolders.map((folder) => <FolderNode key={folder.id} folder={folder} folders={folders} chats={chats} currentChatId={currentChatId} onChat={onChat} onDeleteChat={onDeleteChat} onMoveChat={onMoveChat} onRenameChat={onRenameChat} onRenameFolder={onRenameFolder} onDeleteFolder={onDeleteFolder} locked={locked} />)}
+            {unsortedChats.map((chat) => <ChatRow key={chat.id} chat={chat} currentChatId={currentChatId} onChat={onChat} onDeleteChat={onDeleteChat} onMoveChat={onMoveChat} onRenameChat={onRenameChat} locked={locked} />)}
+          </div>
         </section>
         <section className="sidebar-section thread-section" aria-label="Thread list">
           <h2>Threads<span>{threads.length || ""}</span></h2>

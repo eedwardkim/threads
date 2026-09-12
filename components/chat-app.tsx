@@ -9,10 +9,11 @@ import { mergeMessages } from "@/lib/merge-messages";
 import { useThemePreference } from "@/lib/preferences";
 import { streamStore, useStreams } from "@/lib/stream-store";
 import { useNarrowScreen } from "@/lib/use-narrow-screen";
-import type { AppData, Chat, ChatData, ProviderStatus, SearchResult, Thread, ThreadData } from "@/lib/types";
+import type { AppData, Chat, ChatData, Folder, ProviderStatus, SearchResult, Thread, ThreadData } from "@/lib/types";
 import { Sidebar } from "./sidebar";
 import { SearchPanel } from "./search-panel";
 import { ChatSwitcher } from "./chat-switcher";
+import { MoveToDialog } from "./move-to-dialog";
 import { Composer } from "./composer";
 import { MessageList, type MessageFocus } from "./message-list";
 import { SelectionReply, type SpanSelection } from "./selection-reply";
@@ -32,12 +33,14 @@ function updateLocation(chatId: string | null, threadId: string | null) {
 
 export function ChatApp({ initialData, providerStatus, initialThread = null }: { initialData: AppData; providerStatus: ProviderStatus; initialThread?: ThreadData | null }) {
   const [chats, setChats] = useState(initialData.chats);
+  const [folders, setFolders] = useState(initialData.folders);
   const [current, setCurrent] = useState(initialData.current);
   const [activeThreadId, setActiveThreadId] = useState<string | null>(initialThread?.thread.id ?? null);
   const [threadData, setThreadData] = useState(initialThread);
   const [mobileOpen, setMobileOpen] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
   const [switcherOpen, setSwitcherOpen] = useState(false);
+  const [movingChatId, setMovingChatId] = useState<string | null>(null);
   const [mainFocus, setMainFocus] = useState<MessageFocus | null>(null);
   const [threadFocus, setThreadFocus] = useState<MessageFocus | null>(null);
   const [deleting, setDeleting] = useState<DeleteTarget | null>(null);
@@ -153,9 +156,10 @@ export function ChatApp({ initialData, providerStatus, initialThread = null }: {
 
   const refresh = useCallback(async () => {
     const version = ++loadVersion.current;
-    const result = await requestJson<{ chats: Chat[] }>("/api/chats");
+    const result = await requestJson<{ chats: Chat[]; folders: Folder[] }>("/api/chats");
     if (version !== loadVersion.current) return;
     setChats(result.chats);
+    setFolders(result.folders);
     const id = result.chats.some((chat) => chat.id === currentId.current) ? currentId.current : result.chats[0]?.id;
     currentId.current = id ?? null;
     if (!id) { setCurrent(null); closeThread(); return; }
@@ -181,14 +185,14 @@ export function ChatApp({ initialData, providerStatus, initialThread = null }: {
       if (event.defaultPrevented) return;
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "f") { event.preventDefault(); showSearch(); return; }
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") { event.preventDefault(); setSwitcherOpen(true); return; }
-      if (event.key !== "Escape" || deleting || switcherOpen) return;
+      if (event.key !== "Escape" || deleting || switcherOpen || movingChatId) return;
       if (searchOpen) { event.preventDefault(); closeSearch(); }
       else if (threadId.current) { event.preventDefault(); closeThread(); }
       else setMobileOpen(false);
     };
     window.addEventListener("keydown", keyboard);
     return () => window.removeEventListener("keydown", keyboard);
-  }, [closeThread, closeSearch, showSearch, searchOpen, switcherOpen, deleting]);
+  }, [closeThread, closeSearch, showSearch, searchOpen, switcherOpen, deleting, movingChatId]);
 
   const selectChat = useCallback(async (id: string) => {
     const version = ++loadVersion.current;
@@ -213,6 +217,44 @@ export function ChatApp({ initialData, providerStatus, initialThread = null }: {
       await selectChat(chat.id);
     } catch (error) { toast.error(errorText(error)); }
   }, [selectChat]);
+
+  const createFolder = useCallback(async (name?: string) => {
+    try {
+      const { folder } = await requestJson<{ folder: Folder }>("/api/folders", { method: "POST", body: JSON.stringify({ name: name ?? "New folder" }) });
+      setFolders((existing) => [...existing, folder]);
+      return folder;
+    } catch (error) { toast.error(errorText(error)); throw error; }
+  }, []);
+
+  const renameFolder = useCallback(async (id: string, name: string) => {
+    try {
+      const { folder } = await requestJson<{ folder: Folder }>(`/api/folders?id=${encodeURIComponent(id)}`, { method: "PATCH", body: JSON.stringify({ name }) });
+      setFolders((existing) => existing.map((f) => f.id === folder.id ? folder : f));
+    } catch (error) { toast.error(errorText(error)); }
+  }, []);
+
+  const deleteFolder = useCallback(async (id: string) => {
+    try {
+      await requestJson(`/api/folders?id=${encodeURIComponent(id)}`, { method: "DELETE" });
+      setFolders((existing) => existing.filter((f) => f.id !== id));
+      setChats((existing) => existing.map((c) => c.folderId === id ? { ...c, folderId: null } : c));
+    } catch (error) { toast.error(errorText(error)); }
+  }, []);
+
+  const renameChat = useCallback(async (chatId: string, title: string) => {
+    try {
+      const { chat } = await requestJson<{ chat: Chat }>(`/api/chats?id=${encodeURIComponent(chatId)}`, { method: "PATCH", body: JSON.stringify({ title }) });
+      setChats((existing) => existing.map((c) => c.id === chat.id ? chat : c));
+      if (currentId.current === chat.id) setCurrent((data) => data ? { ...data, chat } : data);
+    } catch (error) { toast.error(errorText(error)); }
+  }, []);
+
+  const moveChat = useCallback(async (chatId: string, folderId: string | null) => {
+    try {
+      const { chat } = await requestJson<{ chat: Chat }>(`/api/chats?id=${encodeURIComponent(chatId)}`, { method: "PATCH", body: JSON.stringify({ folderId }) });
+      setChats((existing) => existing.map((c) => c.id === chat.id ? chat : c));
+    } catch (error) { toast.error(errorText(error)); }
+  }, []);
 
   const replyToSelection = useCallback(async (selection: SpanSelection) => {
     try {
@@ -284,9 +326,11 @@ export function ChatApp({ initialData, providerStatus, initialThread = null }: {
     finally { setDeletePending(false); }
   }
 
+  const movingChat = movingChatId ? chats.find((c) => c.id === movingChatId) : null;
+
   return (
     <div ref={shellRef} className={`app-shell${activeThreadId ? " has-thread" : ""}`} data-theme={theme}>
-      <Sidebar chats={chats} currentChatId={current?.chat.id ?? null} threads={current?.threads ?? []} activeThreadId={activeThreadId} onOpenThread={openThread} onChat={selectChat} onNewChat={newChat} onDeleteChat={(chat) => { setMobileOpen(false); setDeleting({ ...chat, kind: "chat" }); }} mobileOpen={mobileOpen} onCloseMobile={() => setMobileOpen(false)} theme={theme} onToggleTheme={toggleTheme} locked={streams.locked} searchOpen={searchOpen} onSearch={showSearch} onSwitcher={() => setSwitcherOpen(true)}>
+      <Sidebar chats={chats} folders={folders} currentChatId={current?.chat.id ?? null} threads={current?.threads ?? []} activeThreadId={activeThreadId} onOpenThread={openThread} onChat={selectChat} onNewChat={newChat} onDeleteChat={(chat) => { setMobileOpen(false); setDeleting({ ...chat, kind: "chat" }); }} onMoveChat={(chatId) => { setMobileOpen(false); setMovingChatId(chatId); }} onCreateFolder={() => void createFolder()} onRenameFolder={(id, name) => void renameFolder(id, name)} onDeleteFolder={(id) => void deleteFolder(id)} onRenameChat={(id, title) => void renameChat(id, title)} mobileOpen={mobileOpen} onCloseMobile={() => setMobileOpen(false)} theme={theme} onToggleTheme={toggleTheme} locked={streams.locked} searchOpen={searchOpen} onSearch={showSearch} onSwitcher={() => setSwitcherOpen(true)}>
         {searchOpen && <SearchPanel key={current?.chat.id ?? "empty"} chatId={current?.chat.id ?? null} onClose={closeSearch} onSelect={openSearchResult} />}
       </Sidebar>
       {!narrow && <div className="resize-handle" onMouseDown={(e) => { e.preventDefault(); startResize('sidebar', e.clientX); }} onDoubleClick={() => { setSidebarWidth(220); sidebarWidthRef.current = 220; try { localStorage.removeItem('threadllm:sidebar-width'); } catch {} }} />}
@@ -298,9 +342,10 @@ export function ChatApp({ initialData, providerStatus, initialThread = null }: {
       </main>
       {!narrow && activeThreadId && <div className="resize-handle" onMouseDown={(e) => { e.preventDefault(); startResize('thread', e.clientX); }} onDoubleClick={() => { setThreadWidth(340); threadWidthRef.current = 340; try { localStorage.removeItem('threadllm:thread-width'); } catch {} }} />}
       <div className={`thread-shell${activeThreadId ? " is-open" : ""}`}>{activeThreadId && <ThreadPanel key={activeThreadId} id={activeThreadId} data={threadData} narrow={narrow} unavailable={unavailable} providerStatus={providerStatus} errorCode={streams.notice?.code} onClose={closeThread} onResolve={resolveThread} onRefreshContext={updateContext} focus={threadFocus} onCopyToMain={copyToMain} onDelete={() => { if (threadData) setDeleting({ kind: "thread", id: threadData.thread.id, title: threadData.thread.title }); }} />}</div>
-      <SelectionReply messages={messages} locked={streams.locked || unavailable || switcherOpen || Boolean(deleting)} onReply={replyToSelection} />
-      {switcherOpen && <ChatSwitcher chats={chats} currentChatId={current?.chat.id ?? null} onClose={() => setSwitcherOpen(false)} onSelect={selectChat} onNewChat={newChat} />}
-      <Dialog open={Boolean(deleting)} onOpenChange={(open) => { if (!open && !deletePending) setDeleting(null); }}><DialogContent><DialogHeader><DialogTitle>{deleting?.kind === "thread" ? "Delete this thread?" : "Delete this conversation?"}</DialogTitle><DialogDescription>“{deleting?.title}” {deleting?.kind === "thread" ? "and its messages will be deleted. The original answer stays unchanged." : "and all of its threads and messages will be permanently deleted."}</DialogDescription></DialogHeader><div className="dialog-actions"><Button variant="ghost" onClick={() => setDeleting(null)} disabled={deletePending}>Keep {deleting?.kind === "thread" ? "thread" : "conversation"}</Button><Button variant="destructive" onClick={() => void deleteItem()} disabled={deletePending || streams.locked}>{deletePending ? "Deleting…" : `Delete ${deleting?.kind === "thread" ? "thread" : "conversation"}`}</Button></div></DialogContent></Dialog>
+      <SelectionReply messages={messages} locked={streams.locked || unavailable || switcherOpen || Boolean(deleting) || Boolean(movingChatId)} onReply={replyToSelection} />
+      {switcherOpen && <ChatSwitcher chats={chats} folders={folders} currentChatId={current?.chat.id ?? null} onClose={() => setSwitcherOpen(false)} onSelect={selectChat} onNewChat={newChat} onCreateFolder={() => void createFolder()} onMoveChat={(chatId, folderId) => void moveChat(chatId, folderId)} />}
+      {movingChat && <MoveToDialog folders={folders} currentFolderId={movingChat.folderId} onMove={(folderId) => void moveChat(movingChat.id, folderId)} onCreateFolder={async (name) => createFolder(name)} onClose={() => setMovingChatId(null)} />}
+      <Dialog open={Boolean(deleting)} onOpenChange={(open) => { if (!open && !deletePending) setDeleting(null); }}><DialogContent><DialogHeader><DialogTitle>{deleting?.kind === "thread" ? "Delete this thread?" : "Delete this conversation?"}</DialogTitle><DialogDescription>&ldquo;{deleting?.title}&rdquo; {deleting?.kind === "thread" ? "and its messages will be deleted. The original answer stays unchanged." : "and all of its threads and messages will be permanently deleted."}</DialogDescription></DialogHeader><div className="dialog-actions"><Button variant="ghost" onClick={() => setDeleting(null)} disabled={deletePending}>Keep {deleting?.kind === "thread" ? "thread" : "conversation"}</Button><Button variant="destructive" onClick={() => void deleteItem()} disabled={deletePending || streams.locked}>{deletePending ? "Deleting…" : `Delete ${deleting?.kind === "thread" ? "thread" : "conversation"}`}</Button></div></DialogContent></Dialog>
       <Toaster theme={theme} position="top-right" toastOptions={{ className: "margin-toast" }} />
     </div>
   );
