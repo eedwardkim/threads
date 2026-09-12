@@ -305,13 +305,13 @@ describe("ChatRepository", () => {
   });
 
   it("reuses its global singleton across module reloads and clears it on close", async () => {
-    vi.stubGlobal("__marginRepository", repository);
+    vi.stubGlobal("__threadllmRepository", repository);
     expect(getRepository()).toBe(repository);
     vi.resetModules();
     const reloaded = await import("../lib/db/repository");
     expect(reloaded.getRepository()).toBe(repository);
     repository.close();
-    expect((globalThis as { __marginRepository?: ChatRepository }).__marginRepository).toBeUndefined();
+    expect((globalThis as { __threadllmRepository?: ChatRepository }).__threadllmRepository).toBeUndefined();
   });
 
   it("can be closed more than once", () => {

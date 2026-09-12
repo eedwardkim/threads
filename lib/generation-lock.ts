@@ -2,9 +2,9 @@ import { AppError } from "./errors";
 import { ONE_GENERATION_AT_A_TIME } from "./generation-policy";
 
 const generationGlobal = globalThis as typeof globalThis & {
-  __marginGenerationControllers?: Map<string, AbortController>;
+  __threadllmGenerationControllers?: Map<string, AbortController>;
 };
-const controllers = generationGlobal.__marginGenerationControllers ??= new Map<string, AbortController>();
+const controllers = generationGlobal.__threadllmGenerationControllers ??= new Map<string, AbortController>();
 
 function busy() {
   return new AppError("Another operation is running. Stop it or wait for it to finish.", 409, "generation_busy");

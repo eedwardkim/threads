@@ -74,8 +74,8 @@ export function ChatApp({ initialData, providerStatus, initialThread = null }: {
 
   useLayoutEffect(() => {
     try {
-      const sw = localStorage.getItem('margin:sidebar-width');
-      const tw = localStorage.getItem('margin:thread-width');
+      const sw = localStorage.getItem('threadllm:sidebar-width');
+      const tw = localStorage.getItem('threadllm:thread-width');
       if (sw) { const n = Number(sw); if (n >= 160 && n <= 400) { setSidebarWidth(n); sidebarWidthRef.current = n; } }
       if (tw) { const n = Number(tw); if (n >= 260 && n <= 600) { setThreadWidth(n); threadWidthRef.current = n; } }
     } catch {}
@@ -105,8 +105,8 @@ export function ChatApp({ initialData, providerStatus, initialThread = null }: {
       setSidebarWidth(sidebarWidthRef.current);
       setThreadWidth(threadWidthRef.current);
       try {
-        localStorage.setItem('margin:sidebar-width', String(sidebarWidthRef.current));
-        localStorage.setItem('margin:thread-width', String(threadWidthRef.current));
+        localStorage.setItem('threadllm:sidebar-width', String(sidebarWidthRef.current));
+        localStorage.setItem('threadllm:thread-width', String(threadWidthRef.current));
       } catch {}
     };
     document.body.style.cursor = 'col-resize';
@@ -172,8 +172,8 @@ export function ChatApp({ initialData, providerStatus, initialThread = null }: {
 
   useEffect(() => {
     const listener = () => { void refresh().catch((error) => toast.error(errorText(error))); };
-    window.addEventListener("margin:refresh", listener);
-    return () => window.removeEventListener("margin:refresh", listener);
+    window.addEventListener("threadllm:refresh", listener);
+    return () => window.removeEventListener("threadllm:refresh", listener);
   }, [refresh]);
 
   useEffect(() => {
@@ -289,14 +289,14 @@ export function ChatApp({ initialData, providerStatus, initialThread = null }: {
       <Sidebar chats={chats} currentChatId={current?.chat.id ?? null} threads={current?.threads ?? []} activeThreadId={activeThreadId} onOpenThread={openThread} onChat={selectChat} onNewChat={newChat} onDeleteChat={(chat) => { setMobileOpen(false); setDeleting({ ...chat, kind: "chat" }); }} mobileOpen={mobileOpen} onCloseMobile={() => setMobileOpen(false)} theme={theme} onToggleTheme={toggleTheme} locked={streams.locked} searchOpen={searchOpen} onSearch={showSearch} onSwitcher={() => setSwitcherOpen(true)}>
         {searchOpen && <SearchPanel key={current?.chat.id ?? "empty"} chatId={current?.chat.id ?? null} onClose={closeSearch} onSelect={openSearchResult} />}
       </Sidebar>
-      {!narrow && <div className="resize-handle" onMouseDown={(e) => { e.preventDefault(); startResize('sidebar', e.clientX); }} onDoubleClick={() => { setSidebarWidth(220); sidebarWidthRef.current = 220; try { localStorage.removeItem('margin:sidebar-width'); } catch {} }} />}
+      {!narrow && <div className="resize-handle" onMouseDown={(e) => { e.preventDefault(); startResize('sidebar', e.clientX); }} onDoubleClick={() => { setSidebarWidth(220); sidebarWidthRef.current = 220; try { localStorage.removeItem('threadllm:sidebar-width'); } catch {} }} />}
       <main className="main-pane" inert={Boolean(narrow && activeThreadId)}>
         <header className="main-header"><div className="main-title"><Button variant="ghost" size="icon" className="mobile-only" aria-label="Open navigation" onClick={() => setMobileOpen(true)}><Menu /></Button><div><span className="header-eyebrow">Main conversation</span><h1>{current?.chat.title ?? "A fresh page"}</h1></div></div><span className="provider-pill" title={providerStatus.mock ? "Responses are simulated locally. No API key is needed." : "Using your server-side API keys"}><span />{providerStatus.mock ? "Mock mode" : "Live"}</span></header>
         <ProviderBanner status={providerStatus} errorCode={streams.notice?.code} />
         {current && messages.length > 0 ? <MessageList key={current.chat.id} chatId={current.chat.id} threadId={null} messages={messages} threads={current.threads} activeThreadId={activeThreadId} onOpenThread={openThread} session={mainSession} locked={streams.locked} focus={mainFocus} /> : <div className="empty-conversation"><Logo size={46} /><h2>A little room to think.</h2><p>Start with a question. Follow the parts<br />that deserve their own conversation.</p>{!current && <Button variant="outline" onClick={newChat}><Plus size={16} />Start a conversation</Button>}</div>}
         {current && <Composer key={`composer:${current.chat.id}`} chatId={current.chat.id} threadId={null} messages={messages} disabled={unavailable} focusOnMount={messages.length === 0} providerStatus={providerStatus} />}
       </main>
-      {!narrow && activeThreadId && <div className="resize-handle" onMouseDown={(e) => { e.preventDefault(); startResize('thread', e.clientX); }} onDoubleClick={() => { setThreadWidth(340); threadWidthRef.current = 340; try { localStorage.removeItem('margin:thread-width'); } catch {} }} />}
+      {!narrow && activeThreadId && <div className="resize-handle" onMouseDown={(e) => { e.preventDefault(); startResize('thread', e.clientX); }} onDoubleClick={() => { setThreadWidth(340); threadWidthRef.current = 340; try { localStorage.removeItem('threadllm:thread-width'); } catch {} }} />}
       <div className={`thread-shell${activeThreadId ? " is-open" : ""}`}>{activeThreadId && <ThreadPanel key={activeThreadId} id={activeThreadId} data={threadData} narrow={narrow} unavailable={unavailable} providerStatus={providerStatus} errorCode={streams.notice?.code} onClose={closeThread} onResolve={resolveThread} onRefreshContext={updateContext} focus={threadFocus} onCopyToMain={copyToMain} onDelete={() => { if (threadData) setDeleting({ kind: "thread", id: threadData.thread.id, title: threadData.thread.title }); }} />}</div>
       <SelectionReply messages={messages} locked={streams.locked || unavailable || switcherOpen || Boolean(deleting)} onReply={replyToSelection} />
       {switcherOpen && <ChatSwitcher chats={chats} currentChatId={current?.chat.id ?? null} onClose={() => setSwitcherOpen(false)} onSelect={selectChat} onNewChat={newChat} />}

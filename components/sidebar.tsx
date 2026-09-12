@@ -27,7 +27,7 @@ export function Sidebar({ chats, currentChatId, threads, activeThreadId, onChat,
   return <>
     {mobileOpen && <button className="sidebar-scrim" aria-label="Close navigation" onClick={onCloseMobile} />}
     <aside className={`sidebar${mobileOpen ? " is-open" : ""}`} aria-label="Conversations and threads">
-      <div className="sidebar-brand"><Logo size={31} /><span>Margin</span><Button variant="ghost" size="icon" className="mobile-only" aria-label="Close navigation" onClick={onCloseMobile}><X /></Button></div>
+      <div className="sidebar-brand"><Logo size={31} /><span>ThreadLLM</span><Button variant="ghost" size="icon" className="mobile-only" aria-label="Close navigation" onClick={onCloseMobile}><X /></Button></div>
       <div className="sidebar-tools"><Button variant="outline" onClick={onNewChat} className="new-chat-button"><Plus size={16} />New chat</Button><Button variant="outline" size="icon" className="sidebar-search-button" aria-label="Search conversation" title="Search messages (⌘F)" onClick={onSearch}><Search size={15} /></Button></div>
       {children}
       <div className="sidebar-scroll" hidden={searchOpen}>

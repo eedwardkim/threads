@@ -4,8 +4,8 @@ import "@fontsource-variable/jetbrains-mono";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "Margin — room for a second thought",
-  description: "A quiet place to think with DeepSeek. Keep follow-up conversations anchored to the words that started them.",
+  title: "ThreadLLM — room for a second thought",
+  description: "A quiet place to think. Keep follow-up conversations anchored to the words that started them.",
 };
 
 export const viewport: Viewport = { width: "device-width", initialScale: 1, themeColor: "#20262F" };

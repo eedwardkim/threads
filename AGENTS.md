@@ -1,10 +1,10 @@
-# Margin project notes
+# ThreadLLM project notes
 
 - Use Node 22 LTS and npm. The pinned runtime is in `.nvmrc`.
 - `npm install` then `npm run dev` starts the local mock without environment files or an API key.
 - Verification: `npm test`, `npm run typecheck`, `npm run lint`, and `npm run build`. There is no end-to-end test suite; use the browser for interaction acceptance checks.
 - On this machine the system Node is newer than 22. To verify with the pinned runtime without changing the system installation, use `npm exec --yes --package=node@22.23.2 --package=npm@11.19.1 -- npm <command>`.
-- SQLite lives at `.data/margin.sqlite`; initialization, migrations, and one-time seeding run automatically. Never clear this directory to reset an existing user's app. Unit tests use in-memory databases.
+- SQLite lives at `.data/threadllm.sqlite`; initialization, migrations, and one-time seeding run automatically. Never clear this directory to reset an existing user's app. Unit tests use in-memory databases.
 - Tailwind source discovery is explicitly limited to `app` and `components`. Keep generated files and SQLite writes out of the CSS dependency graph to avoid development refresh loops.
 - `lib/markdown-offsets.ts` owns all source-position mapping and anchor rendering. Accept only verified raw offsets; transformed text that cannot be mapped exactly fails closed.
 - Completed message content is immutable. Main and thread queries must remain strictly separated. Copying a thread message to main creates a separate, immutable snapshot.
