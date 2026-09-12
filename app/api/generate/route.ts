@@ -39,6 +39,7 @@ export async function POST(request: Request): Promise<Response> {
     if (thread && (!parent || parent.chatId !== input.chatId || parent.threadId !== null || parent.role !== "assistant" || !parent.complete)) {
       throw new AppError("This thread needs a completed parent message.", 409, "invalid_parent");
     }
+    if (thread && thread.resolved) repository.updateThread(thread.id, { resolved: false });
     const retry = input.retryMessageId ? repository.getMessage(input.retryMessageId) : null;
     if (input.retryMessageId && (!retry || retry.chatId !== input.chatId || retry.threadId !== input.threadId)) {
       throw new AppError("Message not found in this conversation.", 404, "message_not_found");

@@ -1,7 +1,7 @@
 "use client";
 
 import { useLayoutEffect, useRef, useState } from "react";
-import { ArrowUp, Brain, Square, Zap } from "lucide-react";
+import { ArrowUp, Brain, Square } from "lucide-react";
 import { MODELS, PROVIDER_LABEL, DEFAULT_MODEL, isModelKey, type ProviderId } from "@/lib/models";
 import { useModelPreference } from "@/lib/preferences";
 import { streamStore, useStreams } from "@/lib/stream-store";
@@ -54,10 +54,10 @@ export function Composer({ chatId, threadId, messages, disabled = false, focusOn
 
   return (
     <div className={`composer-wrap ${threadId ? "thread-composer-wrap" : "main-composer-wrap"}`}>
-      <div className={`composer${blocked ? " is-disabled" : ""}`}>
+      <div className="composer">
         <textarea ref={textarea} aria-label={threadId ? "Thread message" : "Main message"} data-testid={threadId ? "thread-composer" : "main-composer"}
           placeholder={threadId ? "Ask about this passage…" : "Continue the conversation…"}
-          value={draft} disabled={blocked} rows={2} maxLength={100000}
+          value={draft} rows={2} maxLength={100000}
           onChange={(event) => changeDraft(event.target.value)}
           onKeyDown={(event) => {
             if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) {
@@ -68,10 +68,10 @@ export function Composer({ chatId, threadId, messages, disabled = false, focusOn
         <div className="composer-controls">
           <Select value={model} onValueChange={(value) => { if (isModelKey(value)) setModel(value); }} disabled={blocked}>
             <SelectTrigger aria-label={threadId ? "Thread model" : "Main model"} data-testid={threadId ? "thread-model" : "main-model"} className="model-pill">
-              {model === "thinking" ? <Brain size={14} /> : <Zap size={14} />}
+              {model === "thinking" ? <Brain size={12} /> : null}
               <SelectValue>{MODELS.find((entry) => entry.key === model)?.label}</SelectValue>
             </SelectTrigger>
-            <SelectContent>
+            <SelectContent className="min-w-56">
               {PROVIDER_ORDER.map((providerId) => {
                 const models = MODELS.filter((entry) => entry.provider === providerId);
                 if (models.length === 0) return null;
@@ -79,7 +79,7 @@ export function Composer({ chatId, threadId, messages, disabled = false, focusOn
                 return <SelectGroup key={providerId}>
                   <SelectLabel>{PROVIDER_LABEL[providerId]}</SelectLabel>
                   {models.map((entry) => <SelectItem key={entry.key} value={entry.key} disabled={!available}>
-                    <span className="model-option">{entry.thinking ? <Brain size={15} /> : <Zap size={15} />}<span>{entry.label}<small>{entry.description}</small></span></span>
+                    <span className="model-option"><span>{entry.label}</span><small>{entry.description}</small></span>
                   </SelectItem>)}
                 </SelectGroup>;
               })}

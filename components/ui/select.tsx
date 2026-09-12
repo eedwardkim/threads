@@ -20,7 +20,7 @@ function SelectTrigger({ className, children, ...props }: React.ComponentProps<t
 function SelectContent({ className, children, ...props }: React.ComponentProps<typeof SelectPrimitive.Content>) {
   return (
     <SelectPrimitive.Portal>
-      <SelectPrimitive.Content position="popper" sideOffset={7} className={cn("relative z-[70] min-w-44 overflow-hidden rounded-xl border border-border bg-popover p-1 text-popover-foreground shadow-xl", className)} {...props}>
+      <SelectPrimitive.Content position="popper" sideOffset={6} className={cn("relative z-[70] min-w-44 overflow-hidden rounded-lg border border-border bg-popover p-1 text-popover-foreground shadow-xl", className)} {...props}>
         <SelectPrimitive.Viewport>{children}</SelectPrimitive.Viewport>
       </SelectPrimitive.Content>
     </SelectPrimitive.Portal>
@@ -29,19 +29,19 @@ function SelectContent({ className, children, ...props }: React.ComponentProps<t
 
 function SelectItem({ className, children, ...props }: React.ComponentProps<typeof SelectPrimitive.Item>) {
   return (
-    <SelectPrimitive.Item className={cn("relative flex w-full cursor-default select-none items-center rounded-lg py-2.5 pl-3 pr-8 text-sm outline-none focus:bg-accent data-[disabled]:pointer-events-none data-[disabled]:opacity-50", className)} {...props}>
-      <SelectPrimitive.ItemText>{children}</SelectPrimitive.ItemText>
-      <span className="absolute right-2 flex size-4 items-center justify-center"><SelectPrimitive.ItemIndicator><Check size={14} /></SelectPrimitive.ItemIndicator></span>
+    <SelectPrimitive.Item className={cn("relative flex w-full cursor-default select-none items-center rounded-md py-1.5 pl-7 pr-2.5 text-xs outline-none focus:bg-accent data-[disabled]:pointer-events-none data-[disabled]:opacity-50", className)} {...props}>
+      <span className="absolute left-2 flex size-3.5 items-center justify-center"><SelectPrimitive.ItemIndicator><Check size={12} /></SelectPrimitive.ItemIndicator></span>
+      <SelectPrimitive.ItemText className="flex-1">{children}</SelectPrimitive.ItemText>
     </SelectPrimitive.Item>
   );
 }
 
 function SelectGroup({ className, ...props }: React.ComponentProps<typeof SelectPrimitive.Group>) {
-  return <SelectPrimitive.Group className={cn("py-1", className)} {...props} />;
+  return <SelectPrimitive.Group className={cn("py-0.5", className)} {...props} />;
 }
 
 function SelectLabel({ className, ...props }: React.ComponentProps<typeof SelectPrimitive.Label>) {
-  return <SelectPrimitive.Label className={cn("px-3 py-1.5 text-xs font-semibold uppercase tracking-wide text-muted-foreground", className)} {...props} />;
+  return <SelectPrimitive.Label className={cn("px-2.5 pb-0.5 pt-1.5 text-[9px] font-medium uppercase tracking-wider text-muted-foreground", className)} {...props} />;
 }
 
 export { Select, SelectValue, SelectTrigger, SelectContent, SelectItem, SelectGroup, SelectLabel };
