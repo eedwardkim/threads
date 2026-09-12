@@ -13,7 +13,7 @@ export type AppendMessageInput = Pick<Message, "chatId" | "threadId" | "role" | 
 export type FinishMessageInput = Pick<Message, "content" | "complete">
   & Partial<Pick<Message, "inputTokens" | "outputTokens">>;
 export type InsertThreadInput = Pick<Thread, "parentMessageId" | "anchorStart" | "anchorEnd" | "source" | "compressedContext" | "contextFrozenAt">;
-export type UpdateThreadInput = Partial<Pick<Thread, "resolved" | "compressedContext" | "contextFrozenAt">>;
+export type UpdateThreadInput = Partial<Pick<Thread, "resolved" | "title" | "compressedContext" | "contextFrozenAt">>;
 
 type QueryDatabase = Pick<AppDatabase, "select" | "insert" | "update" | "delete">;
 type ThreadRow = {
@@ -106,6 +106,18 @@ export class ChatRepository {
     const existing = this.db.select().from(folders).where(eq(folders.id, id)).get();
     if (!existing) throw new AppError("Folder not found.", 404, "folder_not_found");
     return this.db.update(folders).set({ name: name.trim() }).where(eq(folders.id, id)).returning().get()!;
+  }
+
+  moveFolder(id: string, parentId: string | null): Folder {
+    if (parentId === id) throw new AppError("A folder cannot be moved into itself.");
+    if (parentId !== null) {
+      let cur = this.db.select().from(folders).where(eq(folders.id, parentId)).get();
+      while (cur) {
+        if (cur.id === id) throw new AppError("A folder cannot be moved into one of its children.");
+        cur = cur.parentId ? this.db.select().from(folders).where(eq(folders.id, cur.parentId)).get() : undefined;
+      }
+    }
+    return this.db.update(folders).set({ parentId }).where(eq(folders.id, id)).returning().get()!;
   }
 
   deleteFolder(id: string): void {

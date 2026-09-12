@@ -26,7 +26,7 @@ export async function POST(request: Request) {
 export async function PATCH(request: Request) {
   try {
     const id = requiredId(new URL(request.url).searchParams.get("id"));
-    const input = await readBody(request, z.union([z.object({ action: z.literal("refresh") }), z.object({ resolved: z.boolean() })]));
+    const input = await readBody(request, z.union([z.object({ action: z.literal("refresh") }), z.object({ resolved: z.boolean() }), z.object({ title: z.string().min(1) })]));
     if ("action" in input) return Response.json(await refreshThreadContext(id, { signal: request.signal }));
     assertIdle();
     getRepository().updateThread(id, input);
