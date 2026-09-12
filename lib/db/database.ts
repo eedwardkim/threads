@@ -5,7 +5,7 @@ import { drizzle, type BetterSQLite3Database } from "drizzle-orm/better-sqlite3"
 import * as schema from "./schema";
 
 export const SCHEMA_VERSION = 4;
-export const DEFAULT_DATABASE_PATH = resolve(process.cwd(), ".data", "threadllm.sqlite");
+export const DEFAULT_DATABASE_PATH = resolve(process.cwd(), ".data", "threads.sqlite");
 export type AppDatabase = BetterSQLite3Database<typeof schema>;
 
 const initialMigration = `

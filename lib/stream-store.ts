@@ -94,7 +94,7 @@ function finish(stream: ActiveStream, receivedFinish: boolean): void {
 }
 
 function refresh(): void {
-  if (typeof window !== "undefined") window.dispatchEvent(new window.Event("margin:refresh"));
+  if (typeof window !== "undefined") window.dispatchEvent(new window.Event("threads:refresh"));
 }
 
 function isAbort(error: unknown): boolean {

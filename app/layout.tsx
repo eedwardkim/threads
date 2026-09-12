@@ -4,7 +4,7 @@ import "@fontsource-variable/jetbrains-mono";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "ThreadLLM — room for a second thought",
+  title: "Threads — room for a second thought",
   description: "A quiet place to think. Keep follow-up conversations anchored to the words that started them.",
 };
 

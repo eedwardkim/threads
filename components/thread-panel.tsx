@@ -15,6 +15,36 @@ import { Button } from "./ui/button";
 
 const EMPTY_THREADS: [] = [];
 
+function ThreadSkeleton() {
+  return <div className="thread-skeleton" role="status" aria-label="Opening thread…">
+    <span className="sr-only">Opening thread…</span>
+    <div className="thread-skeleton-context">
+      <div className="skeleton skeleton-label-line" />
+      <div className="thread-skeleton-quote">
+        <div className="skeleton skeleton-line" />
+        <div className="skeleton skeleton-line" />
+        <div className="skeleton skeleton-line is-short" />
+      </div>
+      <div className="skeleton skeleton-meter" />
+    </div>
+    <div className="thread-skeleton-messages">
+      <div className="thread-skeleton-message">
+        <div className="thread-skeleton-head"><div className="skeleton skeleton-avatar" /><div className="skeleton skeleton-name" /></div>
+        <div className="skeleton skeleton-line" />
+        <div className="skeleton skeleton-line is-short" />
+      </div>
+      <div className="thread-skeleton-message">
+        <div className="thread-skeleton-head"><div className="skeleton skeleton-avatar" /><div className="skeleton skeleton-name" /></div>
+        <div className="skeleton skeleton-line" />
+        <div className="skeleton skeleton-line" />
+        <div className="skeleton skeleton-line" />
+        <div className="skeleton skeleton-line is-short" />
+      </div>
+    </div>
+    <div className="thread-skeleton-composer"><div className="skeleton skeleton-composer-box" /></div>
+  </div>;
+}
+
 export function ThreadPanel({ id, data, narrow, unavailable, providerStatus, errorCode, onClose, onResolve, onDelete, onRefreshContext, focus, onCopyToMain }: {
   id: string;
   data: ThreadData | null;
@@ -62,6 +92,6 @@ export function ThreadPanel({ id, data, narrow, unavailable, providerStatus, err
       </div>
       {messages.length ? <MessageList key={`thread-messages:${id}`} chatId={data.thread.chatId} threadId={id} messages={messages} threads={EMPTY_THREADS} session={session} locked={streams.locked} focus={focus} onCopyToMain={onCopyToMain} /> : <div className="empty-thread"><TextQuote size={29} /><h3>Stay with this thought.</h3><p>Ask a follow-up about this passage.<br />The main conversation stays as it is.</p></div>}
       <Composer key={`thread-composer:${id}`} chatId={data.thread.chatId} threadId={id} messages={messages} disabled={unavailable} focusOnMount providerStatus={providerStatus} />
-    </> : <div className="thread-loading" role="status">Opening thread…</div>}
+    </> : <ThreadSkeleton />}
   </aside>;
 }

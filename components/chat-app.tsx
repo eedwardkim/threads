@@ -67,6 +67,8 @@ export function ChatApp({ initialData, providerStatus, initialThread = null }: {
   const [threadFocus, setThreadFocus] = useState<MessageFocus | null>(null);
   const [deleting, setDeleting] = useState<DeleteTarget | null>(null);
   const [deletePending, setDeletePending] = useState(false);
+  const [threadPending, setThreadPending] = useState(false);
+  const threadPendingRef = useRef(false);
   const currentId = useRef(current?.chat.id ?? null);
   const threadId = useRef(activeThreadId);
   const loadVersion = useRef(0);
@@ -99,8 +101,8 @@ export function ChatApp({ initialData, providerStatus, initialThread = null }: {
 
   useLayoutEffect(() => {
     try {
-      const sw = localStorage.getItem('threadllm:sidebar-width');
-      const tw = localStorage.getItem('threadllm:thread-width');
+      const sw = localStorage.getItem('threads:sidebar-width');
+      const tw = localStorage.getItem('threads:thread-width');
       if (sw) { const n = Number(sw); if (n >= 160 && n <= 400) { setSidebarWidth(n); sidebarWidthRef.current = n; } }
       if (tw) { const n = Number(tw); if (n >= 260 && n <= 600) { setThreadWidth(n); threadWidthRef.current = n; } }
     } catch {}
@@ -130,8 +132,8 @@ export function ChatApp({ initialData, providerStatus, initialThread = null }: {
       setSidebarWidth(sidebarWidthRef.current);
       setThreadWidth(threadWidthRef.current);
       try {
-        localStorage.setItem('threadllm:sidebar-width', String(sidebarWidthRef.current));
-        localStorage.setItem('threadllm:thread-width', String(threadWidthRef.current));
+        localStorage.setItem('threads:sidebar-width', String(sidebarWidthRef.current));
+        localStorage.setItem('threads:thread-width', String(threadWidthRef.current));
       } catch {}
     };
     document.body.style.cursor = 'col-resize';
@@ -154,6 +156,8 @@ export function ChatApp({ initialData, providerStatus, initialThread = null }: {
   const closeThread = useCallback(() => {
     threadId.current = null;
     threadVersion.current += 1;
+    threadPendingRef.current = false;
+    setThreadPending(false);
     setActiveThreadId(null);
     setThreadData(null);
     updateLocation(currentId.current, null);
@@ -198,8 +202,8 @@ export function ChatApp({ initialData, providerStatus, initialThread = null }: {
 
   useEffect(() => {
     const listener = () => { void refresh().catch((error) => toast.error(errorText(error))); };
-    window.addEventListener("threadllm:refresh", listener);
-    return () => window.removeEventListener("threadllm:refresh", listener);
+    window.addEventListener("threads:refresh", listener);
+    return () => window.removeEventListener("threads:refresh", listener);
   }, [refresh]);
 
   useEffect(() => {
@@ -209,7 +213,7 @@ export function ChatApp({ initialData, providerStatus, initialThread = null }: {
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") { event.preventDefault(); setSwitcherOpen(true); return; }
       if (event.key !== "Escape" || deleting || switcherOpen || movingChatId) return;
       if (searchOpen) { event.preventDefault(); closeSearch(); }
-      else if (threadId.current) { event.preventDefault(); closeThread(); }
+      else if (threadId.current || threadPendingRef.current) { event.preventDefault(); closeThread(); }
       else setMobileOpen(false);
     };
     window.addEventListener("keydown", keyboard);
@@ -293,15 +297,23 @@ export function ChatApp({ initialData, providerStatus, initialThread = null }: {
   }, []);
 
   const replyToSelection = useCallback(async (selection: SpanSelection) => {
+    threadPendingRef.current = true;
+    setThreadPending(true);
+    setThreadFocus(null);
+    setMobileOpen(false);
     try {
       const { thread } = await streamStore.runOperation("Preparing your thread…", (signal) => requestJson<{ thread: Thread }>("/api/threads", {
         method: "POST", signal, body: JSON.stringify({ parentMessageId: selection.parentMessageId, anchorStart: selection.anchorStart, anchorEnd: selection.anchorEnd, source: "user" }),
       }));
+      const openWhenReady = threadPendingRef.current;
+      threadPendingRef.current = false;
+      setThreadPending(false);
       if (thread.chatId !== currentId.current) return;
       setCurrent((data) => data ? { ...data, threads: [...data.threads.filter((item) => item.id !== thread.id), thread] } : data);
-      setThreadFocus(null);
-      await openThread(thread.id);
+      if (openWhenReady) await openThread(thread.id);
     } catch (error) {
+      threadPendingRef.current = false;
+      setThreadPending(false);
       if (!(error instanceof Error && error.name === "AbortError")) toast.error(errorText(error));
     }
   }, [openThread]);
@@ -363,27 +375,28 @@ export function ChatApp({ initialData, providerStatus, initialThread = null }: {
   }
 
   const movingChat = movingChatId ? chats.find((c) => c.id === movingChatId) : null;
+  const threadOpen = activeThreadId !== null || threadPending;
 
   return (
-    <div ref={shellRef} className={`app-shell${activeThreadId ? " has-thread" : ""}`} data-theme={theme}>
-      <Sidebar chats={chats} folders={folders} currentChatId={current?.chat.id ?? null} threads={current?.threads ?? []} activeThreadId={activeThreadId} onOpenThread={openThread} onChat={selectChat} onNewChat={newChat} onDeleteChat={(chat) => { setMobileOpen(false); setDeleting({ ...chat, kind: "chat" }); }} onMoveChat={(chatId) => { setMobileOpen(false); setMovingChatId(chatId); }} onRenameFolder={(id, name) => void renameFolder(id, name)} onDeleteFolder={(id) => void deleteFolder(id)} onMoveFolder={(id) => { setMobileOpen(false); setMovingFolderId(id); }} onRenameChat={(id, title) => void renameChat(id, title)} onRenameThread={(id, title) => void renameThread(id, title)} onDeleteThread={(thread) => { setMobileOpen(false); setDeleting({ ...thread, kind: "thread" }); }} mobileOpen={mobileOpen} onCloseMobile={() => setMobileOpen(false)} theme={theme} onToggleTheme={toggleTheme} locked={streams.locked} searchOpen={searchOpen} onSearch={showSearch} onSwitcher={() => setSwitcherOpen(true)}>
+    <div ref={shellRef} className={`app-shell${threadOpen ? " has-thread" : ""}`} data-theme={theme}>
+      <Sidebar chats={chats} folders={folders} currentChatId={current?.chat.id ?? null} threads={current?.threads ?? []} activeThreadId={activeThreadId} onOpenThread={openThread} onChat={selectChat} onNewChat={newChat} onDeleteChat={(chat) => { setMobileOpen(false); setDeleting({ ...chat, kind: "chat" }); }} onMoveChat={(chatId) => { setMobileOpen(false); setMovingChatId(chatId); }} onRenameFolder={(id, name) => void renameFolder(id, name)} onDeleteFolder={(id) => void deleteFolder(id)} onMoveFolder={(id) => { setMobileOpen(false); setMovingFolderId(id); }} onDropChat={(chatId, folderId) => void moveChat(chatId, folderId)} onRenameChat={(id, title) => void renameChat(id, title)} onRenameThread={(id, title) => void renameThread(id, title)} onDeleteThread={(thread) => { setMobileOpen(false); setDeleting({ ...thread, kind: "thread" }); }} mobileOpen={mobileOpen} onCloseMobile={() => setMobileOpen(false)} theme={theme} onToggleTheme={toggleTheme} locked={streams.locked} searchOpen={searchOpen} onSearch={showSearch} onSwitcher={() => setSwitcherOpen(true)}>
         {searchOpen && <SearchPanel key={current?.chat.id ?? "empty"} chatId={current?.chat.id ?? null} onClose={closeSearch} onSelect={openSearchResult} />}
       </Sidebar>
-      {!narrow && <div className="resize-handle" onMouseDown={(e) => { e.preventDefault(); startResize('sidebar', e.clientX); }} onDoubleClick={() => { setSidebarWidth(220); sidebarWidthRef.current = 220; try { localStorage.removeItem('threadllm:sidebar-width'); } catch {} }} />}
-      <main className="main-pane" inert={Boolean(narrow && activeThreadId)}>
+      {!narrow && <div className="resize-handle" onMouseDown={(e) => { e.preventDefault(); startResize('sidebar', e.clientX); }} onDoubleClick={() => { setSidebarWidth(220); sidebarWidthRef.current = 220; try { localStorage.removeItem('threads:sidebar-width'); } catch {} }} />}
+      <main className="main-pane" inert={Boolean(narrow && threadOpen)}>
         <header className="main-header"><div className="main-title"><Button variant="ghost" size="icon" className="mobile-only" aria-label="Open navigation" onClick={() => setMobileOpen(true)}><Menu /></Button><EditableTitle title={current?.chat.title ?? "A fresh page"} disabled={!current} onSave={(title) => current && void renameChat(current.chat.id, title)} /></div></header>
         <ProviderBanner status={providerStatus} errorCode={streams.notice?.code} />
         {current && messages.length > 0 ? <MessageList key={current.chat.id} chatId={current.chat.id} threadId={null} messages={messages} threads={current.threads} activeThreadId={activeThreadId} onOpenThread={openThread} session={mainSession} locked={streams.locked} focus={mainFocus} /> : <div className="empty-conversation"><Logo size={46} /><h2>A little room to think.</h2><p>Start with a question. Follow the parts<br />that deserve their own thread.</p>{!current && <Button variant="outline" onClick={newChat}><Plus size={16} />Start a conversation</Button>}</div>}
         {current && <Composer key={`composer:${current.chat.id}`} chatId={current.chat.id} threadId={null} messages={messages} disabled={unavailable} focusOnMount={messages.length === 0} providerStatus={providerStatus} />}
       </main>
-      {!narrow && activeThreadId && <div className="resize-handle" onMouseDown={(e) => { e.preventDefault(); startResize('thread', e.clientX); }} onDoubleClick={() => { setThreadWidth(340); threadWidthRef.current = 340; try { localStorage.removeItem('threadllm:thread-width'); } catch {} }} />}
-      <div className={`thread-shell${activeThreadId ? " is-open" : ""}`}>{activeThreadId && <ThreadPanel key={activeThreadId} id={activeThreadId} data={threadData} narrow={narrow} unavailable={unavailable} providerStatus={providerStatus} errorCode={streams.notice?.code} onClose={closeThread} onResolve={resolveThread} onRefreshContext={updateContext} focus={threadFocus} onCopyToMain={copyToMain} onDelete={() => { if (threadData) setDeleting({ kind: "thread", id: threadData.thread.id, title: threadData.thread.title }); }} />}</div>
+      {!narrow && threadOpen && <div className="resize-handle" onMouseDown={(e) => { e.preventDefault(); startResize('thread', e.clientX); }} onDoubleClick={() => { setThreadWidth(340); threadWidthRef.current = 340; try { localStorage.removeItem('threads:thread-width'); } catch {} }} />}
+      <div className={`thread-shell${threadOpen ? " is-open" : ""}`}>{threadOpen && <ThreadPanel key={activeThreadId ?? "pending"} id={activeThreadId ?? "pending"} data={activeThreadId ? threadData : null} narrow={narrow} unavailable={unavailable} providerStatus={providerStatus} errorCode={streams.notice?.code} onClose={closeThread} onResolve={resolveThread} onRefreshContext={updateContext} focus={threadFocus} onCopyToMain={copyToMain} onDelete={() => { if (threadData) setDeleting({ kind: "thread", id: threadData.thread.id, title: threadData.thread.title }); }} />}</div>
       <SelectionReply messages={messages} locked={streams.locked || unavailable || switcherOpen || Boolean(deleting) || Boolean(movingChatId)} onReply={replyToSelection} />
       {switcherOpen && <ChatSwitcher chats={chats} folders={folders} currentChatId={current?.chat.id ?? null} onClose={() => setSwitcherOpen(false)} onSelect={selectChat} onNewChat={newChat} onCreateFolder={() => void createFolder()} onMoveChat={(chatId, folderId) => void moveChat(chatId, folderId)} />}
       {movingChat && <MoveToDialog folders={folders} currentFolderId={movingChat.folderId} onMove={(folderId) => void moveChat(movingChat.id, folderId)} onCreateFolder={async (name) => createFolder(name)} onClose={() => setMovingChatId(null)} />}
       {movingFolderId && <MoveToDialog folders={folders.filter((f) => { let id: string | null = f.id; while (id) { if (id === movingFolderId) return false; const p = folders.find((x) => x.id === id); id = p?.parentId ?? null; } return true; })} currentFolderId={folders.find((f) => f.id === movingFolderId)?.parentId ?? null} onMove={(folderId) => void moveFolder(movingFolderId, folderId)} onCreateFolder={async (name) => createFolder(name)} onClose={() => setMovingFolderId(null)} />}
       <Dialog open={Boolean(deleting)} onOpenChange={(open) => { if (!open && !deletePending) setDeleting(null); }}><DialogContent><DialogHeader><DialogTitle>{deleting?.kind === "thread" ? "Delete this thread?" : "Delete this conversation?"}</DialogTitle><DialogDescription>&ldquo;{deleting?.title}&rdquo; {deleting?.kind === "thread" ? "and its messages will be deleted. The original answer stays unchanged." : "and all of its threads and messages will be permanently deleted."}</DialogDescription></DialogHeader><div className="dialog-actions"><Button variant="ghost" onClick={() => setDeleting(null)} disabled={deletePending}>Keep {deleting?.kind === "thread" ? "thread" : "conversation"}</Button><Button variant="destructive" onClick={() => void deleteItem()} disabled={deletePending || streams.locked}>{deletePending ? "Deleting…" : `Delete ${deleting?.kind === "thread" ? "thread" : "conversation"}`}</Button></div></DialogContent></Dialog>
-      <Toaster theme={theme} position="top-right" toastOptions={{ className: "margin-toast" }} />
+      <Toaster theme={theme} position="top-right" toastOptions={{ className: "threads-toast" }} />
     </div>
   );
 }

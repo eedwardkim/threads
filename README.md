@@ -1,4 +1,4 @@
-# ThreadLLM
+# Threads
 
 A local, single-user AI chat client. Select a passage in an answer to keep a follow-up beside the idea that started it.
 
@@ -8,7 +8,7 @@ A local, single-user AI chat client. Select a passage in an answer to keep a fol
 2. Run: `npm run dev`, then open http://localhost:3000.
 3. Go live: set `DEEPSEEK_API_KEY=your-key` and `USE_MOCK=false` in `.env.local`, then restart.
 
-No configuration or API key is needed for the default mock. The SQLite database is created, migrated, and seeded automatically at `.data/threadllm.sqlite`. Both environment variables are server-only; `.env.example` documents their defaults. Keep `.env.local` and `.data` private.
+No configuration or API key is needed for the default mock. The SQLite database is created, migrated, and seeded automatically at `.data/threads.sqlite`. Both environment variables are server-only; `.env.example` documents their defaults. Keep `.env.local` and `.data` private.
 
 ## Controls
 

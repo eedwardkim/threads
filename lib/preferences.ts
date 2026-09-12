@@ -38,7 +38,7 @@ function save(key: string, value: string) {
 }
 
 export function useModelPreference(scope: string, fallback: ModelKey) {
-  const key = `threadllm:model:${scope}`;
+  const key = `threads:model:${scope}`;
   const snapshot = useCallback(() => {
     const value = read(key);
     return isModelKey(value) ? value : fallback;
@@ -48,6 +48,6 @@ export function useModelPreference(scope: string, fallback: ModelKey) {
 }
 
 export function useThemePreference() {
-  const theme = useSyncExternalStore<"dark" | "light">(subscribe, () => read("threadllm:theme") === "light" ? "light" : "dark", () => "dark");
-  return [theme, () => save("threadllm:theme", theme === "dark" ? "light" : "dark")] as const;
+  const theme = useSyncExternalStore<"dark" | "light">(subscribe, () => read("threads:theme") === "light" ? "light" : "dark", () => "dark");
+  return [theme, () => save("threads:theme", theme === "dark" ? "light" : "dark")] as const;
 }

@@ -1,8 +1,9 @@
 "use client";
 
-import { useState, useMemo, useCallback, type DragEvent } from "react";
+import { useState, useMemo, useCallback, useRef, type DragEvent } from "react";
 import { ChevronRight, FolderPlus, MessageSquare, Plus, Search } from "lucide-react";
 import type { Chat, Folder } from "@/lib/types";
+import { CHAT_DRAG_MIME, isChatDrag, setChatDragImage } from "@/lib/drag-ghost";
 import { Button } from "./ui/button";
 import { Dialog, DialogContent } from "./ui/dialog";
 
@@ -42,7 +43,8 @@ export function ChatSwitcher({
   const [query, setQuery] = useState("");
   const [folderId, setFolderId] = useState<string | null>(null);
   const [dropTarget, setDropTarget] = useState<string | null>(null);
-  const [dragging, setDragging] = useState(false);
+  const [draggingId, setDraggingId] = useState<string | null>(null);
+  const dragCleanup = useRef<(() => void) | null>(null);
   const folderMap = useMemo(() => new Map(folders.map((f) => [f.id, f])), [folders]);
   const breadcrumb = useMemo(() => buildBreadcrumb(folderId, folderMap), [folderId, folderMap]);
 
@@ -50,38 +52,50 @@ export function ChatSwitcher({
   const childChats = chats.filter((c) => c.folderId === folderId);
   const searchHits = query ? chats.filter((c) => c.title.toLowerCase().includes(query.toLowerCase())) : null;
 
-  const onDragStart = useCallback((e: DragEvent, chatId: string) => {
-    e.dataTransfer.setData("text/plain", chatId);
-    e.dataTransfer.effectAllowed = "move";
-    setDragging(true);
+  const endDrag = useCallback(() => {
+    setDraggingId(null);
+    setDropTarget(null);
+    dragCleanup.current?.();
+    dragCleanup.current = null;
   }, []);
 
-  const onDragEnd = useCallback(() => {
-    setDragging(false);
-    setDropTarget(null);
+  const onDragStart = useCallback((e: DragEvent, chat: Chat) => {
+    e.dataTransfer.setData(CHAT_DRAG_MIME, chat.id);
+    e.dataTransfer.setData("text/plain", chat.id);
+    e.dataTransfer.effectAllowed = "move";
+    dragCleanup.current = setChatDragImage(e.dataTransfer, chat.title);
+    setDraggingId(chat.id);
   }, []);
 
   const onFolderDragOver = useCallback((e: DragEvent, id: string) => {
+    if (!isChatDrag(e.dataTransfer)) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = "move";
+    setDropTarget(id);
+  }, []);
+
+  const onBreadcrumbDragOver = useCallback((e: DragEvent, id: string) => {
+    if (!isChatDrag(e.dataTransfer)) return;
     e.preventDefault();
     e.dataTransfer.dropEffect = "move";
     setDropTarget(id);
   }, []);
 
   const onFolderDrop = useCallback((e: DragEvent, targetFolderId: string) => {
+    if (!isChatDrag(e.dataTransfer)) return;
     e.preventDefault();
-    const chatId = e.dataTransfer.getData("text/plain");
+    const chatId = e.dataTransfer.getData(CHAT_DRAG_MIME) || e.dataTransfer.getData("text/plain");
     if (chatId && onMoveChat) onMoveChat(chatId, targetFolderId);
-    setDropTarget(null);
-    setDragging(false);
-  }, [onMoveChat]);
+    endDrag();
+  }, [onMoveChat, endDrag]);
 
   const onBreadcrumbDrop = useCallback((e: DragEvent, targetFolderId: string | null) => {
+    if (!isChatDrag(e.dataTransfer)) return;
     e.preventDefault();
-    const chatId = e.dataTransfer.getData("text/plain");
+    const chatId = e.dataTransfer.getData(CHAT_DRAG_MIME) || e.dataTransfer.getData("text/plain");
     if (chatId && onMoveChat) onMoveChat(chatId, targetFolderId);
-    setDropTarget(null);
-    setDragging(false);
-  }, [onMoveChat]);
+    endDrag();
+  }, [onMoveChat, endDrag]);
 
   return (
     <Dialog open onOpenChange={(open) => { if (!open) onClose(); }}>
@@ -91,7 +105,7 @@ export function ChatSwitcher({
             <button
               className={`${!folderId ? "is-current" : ""}${dropTarget === "__root__" ? " is-drop-target" : ""}`}
               onClick={() => setFolderId(null)}
-              onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = "move"; setDropTarget("__root__"); }}
+              onDragOver={(e) => onBreadcrumbDragOver(e, "__root__")}
               onDragLeave={() => setDropTarget(null)}
               onDrop={(e) => onBreadcrumbDrop(e, null)}
             >All</button>
@@ -101,7 +115,7 @@ export function ChatSwitcher({
                 <button
                   className={`${f.id === folderId ? "is-current" : ""}${dropTarget === f.id ? " is-drop-target" : ""}`}
                   onClick={() => setFolderId(f.id)}
-                  onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = "move"; setDropTarget(f.id); }}
+                  onDragOver={(e) => onBreadcrumbDragOver(e, f.id)}
                   onDragLeave={() => setDropTarget(null)}
                   onDrop={(e) => onBreadcrumbDrop(e, f.id)}
                 >{f.name}</button>
@@ -119,16 +133,16 @@ export function ChatSwitcher({
           <input autoFocus placeholder="Search conversations…" value={query} onChange={(e) => setQuery(e.target.value)} aria-label="Search conversations" />
         </div>
 
-        <div className={`fb-grid${dragging ? " is-dragging" : ""}`} role="list">
+        <div className={`fb-grid${draggingId ? " is-dragging" : ""}`} role="list">
           {searchHits ? (
             <>
               {searchHits.map((chat) => (
                 <button
                   key={chat.id} role="listitem"
-                  className={`fb-chat-card${chat.id === currentChatId ? " is-current" : ""}`}
+                  className={`fb-chat-card${chat.id === currentChatId ? " is-current" : ""}${chat.id === draggingId ? " is-drag-source" : ""}`}
                   draggable
-                  onDragStart={(e) => onDragStart(e, chat.id)}
-                  onDragEnd={onDragEnd}
+                  onDragStart={(e) => onDragStart(e, chat)}
+                  onDragEnd={endDrag}
                   onClick={() => { onSelect(chat.id); onClose(); }}
                 >
                   <div className="fb-doc-icon"><MessageSquare size={18} /></div>
@@ -159,10 +173,10 @@ export function ChatSwitcher({
               {childChats.map((chat) => (
                 <button
                   key={chat.id} role="listitem"
-                  className={`fb-chat-card${chat.id === currentChatId ? " is-current" : ""}`}
+                  className={`fb-chat-card${chat.id === currentChatId ? " is-current" : ""}${chat.id === draggingId ? " is-drag-source" : ""}`}
                   draggable
-                  onDragStart={(e) => onDragStart(e, chat.id)}
-                  onDragEnd={onDragEnd}
+                  onDragStart={(e) => onDragStart(e, chat)}
+                  onDragEnd={endDrag}
                   onClick={() => { onSelect(chat.id); onClose(); }}
                 >
                   <div className="fb-doc-icon"><MessageSquare size={18} /></div>

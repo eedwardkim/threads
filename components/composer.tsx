@@ -60,7 +60,7 @@ export function Composer({ chatId, threadId, messages, disabled = false, focusOn
           value={draft} rows={2} maxLength={100000}
           onChange={(event) => changeDraft(event.target.value)}
           onKeyDown={(event) => {
-            if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) {
+            if (event.key === "Enter" && !event.shiftKey) {
               event.preventDefault();
               void send();
             }
@@ -87,7 +87,7 @@ export function Composer({ chatId, threadId, messages, disabled = false, focusOn
           </Select>
           <div className="send-controls">
             {streams.active ? <Button variant="secondary" size="sm" onClick={() => streamStore.stop()} aria-label="Stop generation" className="stop-button"><Square size={12} fill="currentColor" />Stop</Button> : <>
-              <span className="send-hint"><kbd>⌘</kbd><kbd>Enter</kbd></span>
+              <span className="send-hint"><kbd>Enter</kbd></span>
               <Button size="icon" className="send-button" aria-label={threadId ? "Send thread message" : "Send main message"} disabled={blocked || !draft.trim()} onClick={() => void send()}><ArrowUp /></Button>
             </>}
           </div>

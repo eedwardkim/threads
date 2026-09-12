@@ -77,8 +77,8 @@ export class ChatRepository {
 
   close(): void {
     if (this.sqlite.open) this.sqlite.close();
-    if (repositoryGlobal.__threadllmRepository === this) {
-      delete repositoryGlobal.__threadllmRepository;
+    if (repositoryGlobal.__threadsRepository === this) {
+      delete repositoryGlobal.__threadsRepository;
     }
   }
 
@@ -409,13 +409,13 @@ export class ChatRepository {
 
 import { seedDatabase } from "../seed";
 
-const repositoryGlobal = globalThis as typeof globalThis & { __threadllmRepository?: ChatRepository };
+const repositoryGlobal = globalThis as typeof globalThis & { __threadsRepository?: ChatRepository };
 
 export function getRepository(): ChatRepository {
-  if (!repositoryGlobal.__threadllmRepository) {
+  if (!repositoryGlobal.__threadsRepository) {
     const repository = new ChatRepository(DEFAULT_DATABASE_PATH);
     repository.seedOnce(seedDatabase);
-    repositoryGlobal.__threadllmRepository = repository;
+    repositoryGlobal.__threadsRepository = repository;
   }
-  return repositoryGlobal.__threadllmRepository;
+  return repositoryGlobal.__threadsRepository;
 }

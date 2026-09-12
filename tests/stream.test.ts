@@ -525,7 +525,7 @@ describe("component-independent stream store", () => {
     });
     expect(current.sessions.get(null)).toMatchObject({ phase: "streaming", message: { content: "漢字 text", complete: false }, userMessage });
     const refresh = vi.fn();
-    window.addEventListener("margin:refresh", refresh, { once: true });
+    window.addEventListener("threads:refresh", refresh, { once: true });
     await act(async () => {
       response.controller.enqueue(new TextEncoder().encode(JSON.stringify({ type: "finish", message: { ...message, content: "漢字 text", complete: true, inputTokens: 4, outputTokens: 2 } })));
       response.controller.close();
