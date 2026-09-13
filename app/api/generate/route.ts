@@ -4,6 +4,7 @@ import { attributeContextUsage } from "../../../lib/context";
 import { getRepository } from "../../../lib/db/repository";
 import { AppError, readableError } from "../../../lib/errors";
 import { acquireGeneration, stopGeneration } from "../../../lib/generation-lock";
+import { normalizeMathDelimiters } from "../../../lib/math";
 import { isModelKey, type ModelKey } from "../../../lib/models";
 import { assembleMainPrompt, assembleThreadPrompt } from "../../../lib/prompts";
 import { getProviderStatus, requireProviderAvailable, streamChat } from "../../../lib/provider";
@@ -114,7 +115,9 @@ export async function POST(request: Request): Promise<Response> {
       } finally {
         try {
           try {
-            message = repository.finishMessage(message.id, { content, complete: successful && !signal.aborted, inputTokens, outputTokens });
+            const complete = successful && !signal.aborted;
+            if (complete) content = normalizeMathDelimiters(content);
+            message = repository.finishMessage(message.id, { content, complete, inputTokens, outputTokens });
             if (thread && inputTokens !== null) {
               const current = repository.getThread(thread.id);
               if (current && current.contextFrozenAt === thread.contextFrozenAt) {

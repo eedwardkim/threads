@@ -8,6 +8,7 @@
 - Tailwind source discovery is explicitly limited to `app` and `components`. Keep generated files and SQLite writes out of the CSS dependency graph to avoid development refresh loops.
 - `lib/markdown-offsets.ts` owns all source-position mapping and anchor rendering. Accept only verified raw offsets; transformed text that cannot be mapped exactly fails closed.
 - Completed message content is immutable. Main and thread queries must remain strictly separated. Copying a thread message to main creates a separate, immutable snapshot.
+- `lib/math.ts` normalizes LaTeX delimiters only when generation succeeds, before the final immutable save. The finish event supplies that same source to the browser; never normalize at render time or rewrite existing completed messages, since thread anchors use persisted offsets.
 - `lib/stream-store.ts` owns browser streams independently of mounted components. The shared concurrency switch is `lib/generation-policy.ts`.
 - API model IDs belong only in `lib/models.ts`; persist stable model keys. Provider credentials and mode are server-only. The page passes only provider-status booleans to the client.
 - Frozen context metadata is stripped before prompt assembly. Usage attribution must not change briefing text or prompt bytes; explicit context refresh invalidates old usage attribution.

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { assembleMainPrompt, assembleThreadPrompt, MAIN_SYSTEM_PROMPT, renderBriefing } from "../lib/prompts";
+import { assembleFullThreadPrompt, assembleMainPrompt, assembleThreadPrompt, MAIN_SYSTEM_PROMPT, renderBriefing } from "../lib/prompts";
 import type { Briefing, FrozenContext, Message, Thread } from "../lib/types";
 
 function message(input: Partial<Message> = {}): Message {
@@ -29,12 +29,28 @@ const briefing: Briefing = {
 
 describe("prompt assembly", () => {
   it("keeps the main system prefix byte-stable across calls and models", () => {
-    expect(MAIN_SYSTEM_PROMPT).toBe("You are a thoughtful, precise assistant. Answer the user's request directly, and use Markdown where it improves clarity.");
+    expect(MAIN_SYSTEM_PROMPT).toBe("You are a thoughtful, precise assistant. Answer the user's request directly, and use Markdown where it improves clarity. For math, use $...$ for inline expressions and $$ delimiters on separate lines for display equations, never \\(...\\) or \\[...\\].");
     const first = assembleMainPrompt([message()]);
     const second = assembleMainPrompt([message({ modelKey: "thinking", content: "Another question" })]);
     expect(first[0]).toEqual({ role: "system", content: MAIN_SYSTEM_PROMPT });
     expect(new TextEncoder().encode(first[0].content)).toEqual(new TextEncoder().encode(second[0].content));
     expect(assembleMainPrompt([])).toEqual([first[0]]);
+  });
+
+  it("shares math instructions across main, frozen-context, and full-context thread prompts without changing frozen bytes", () => {
+    const branch = thread({ kind: "compressed", briefing });
+    const parent = message({ role: "assistant", content: "Parent with $x^2$" });
+    const before = branch.compressedContext;
+    const assembled = [
+      assembleMainPrompt([parent]),
+      assembleThreadPrompt(branch, parent, []),
+      assembleFullThreadPrompt(branch, [parent], []),
+    ];
+    for (const prompt of assembled) {
+      expect(prompt[0]).toEqual({ role: "system", content: MAIN_SYSTEM_PROMPT });
+      expect(prompt.filter((item) => item.content === MAIN_SYSTEM_PROMPT)).toHaveLength(1);
+    }
+    expect(branch.compressedContext).toBe(before);
   });
 
   it("excludes every threaded row from main even when a caller passes mixed history", () => {
@@ -67,15 +83,16 @@ describe("prompt assembly", () => {
       message({ chatId: "another-chat", threadId: branch.id, content: "Other chat must never leak" }),
       answer,
     ]);
-    expect(result).toHaveLength(5);
-    expect(result[0]).toEqual({ role: "system", content: `Frozen main conversation briefing:\n\n${renderBriefing(briefing)}` });
+    expect(result).toHaveLength(6);
+    expect(result[0]).toEqual({ role: "system", content: MAIN_SYSTEM_PROMPT });
+    expect(result[1]).toEqual({ role: "system", content: `Frozen main conversation briefing:\n\n${renderBriefing(briefing)}` });
     for (const label of ["Goal:", "Constraints:", "Decisions:", "Artifacts:", "Open questions:"]) {
-      expect(result[0].content).toContain(label);
+      expect(result[1].content).toContain(label);
     }
     for (const value of [briefing.goal, ...briefing.constraints, ...briefing.decisions, ...briefing.artifacts, ...briefing.open_questions]) {
-      expect(result[0].content).toContain(value);
+      expect(result[1].content).toContain(value);
     }
-    expect(result.slice(1)).toEqual([
+    expect(result.slice(2)).toEqual([
       { role: "assistant", content: parent.content },
       { role: "system", content: `Thread subject:\n${branch.anchorExact}` },
       { role: "user", content: question.content },
@@ -95,12 +112,15 @@ describe("prompt assembly", () => {
     const branch = thread(frozen);
     const parent = message({ role: "assistant", content: "The entire parent" });
     const result = assembleThreadPrompt(branch, parent, []);
-    expect(result[0].role).toBe("system");
-    expect(result[0].content).toContain("Frozen main conversation context (verbatim fallback):");
-    frozen.messages.forEach((item, index) => {
-      expect(result[0].content).toContain(`--- Message ${index + 1} (${item.role}) ---\n${item.content}\n--- End message ${index + 1} ---`);
+    expect(result[0]).toEqual({ role: "system", content: MAIN_SYSTEM_PROMPT });
+    expect(result[1]).toEqual({
+      role: "system",
+      content: `Frozen main conversation context (verbatim fallback):\n\n${frozen.messages.map((item, index) =>
+        `--- Message ${index + 1} (${item.role}) ---\n${item.content}\n--- End message ${index + 1} ---`,
+      ).join("\n\n")}`,
     });
-    expect(result.slice(1)).toEqual([
+    expect(branch.compressedContext).toBe(JSON.stringify(frozen));
+    expect(result.slice(2)).toEqual([
       { role: "assistant", content: parent.content },
       { role: "system", content: "Thread subject:\nSubject" },
     ]);
@@ -110,6 +130,7 @@ describe("prompt assembly", () => {
   it("handles a not-yet-frozen context without importing the main conversation", () => {
     const parent = message({ role: "assistant", content: "Parent" });
     expect(assembleThreadPrompt(thread(), parent, [message()])).toEqual([
+      { role: "system", content: MAIN_SYSTEM_PROMPT },
       { role: "system", content: "Frozen main conversation briefing:\nNo briefing is available." },
       { role: "assistant", content: "Parent" },
       { role: "system", content: "Thread subject:\nSubject" },

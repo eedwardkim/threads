@@ -376,6 +376,7 @@ describe("context token accounting and verbatim prompts", () => {
       { ...question, id: "other-chat", chatId: "other-chat", content: "OTHER_CHAT_SENTINEL" },
     ]);
     expect(assembled).toEqual([
+      { role: "system", content: prompts.MAIN_SYSTEM_PROMPT },
       { role: "system", content: `Frozen main conversation briefing:\n\n${prompts.renderBriefing(briefing)}` },
       { role: "assistant", content: parent.content },
       { role: "system", content: `Thread subject:\n${thread.anchorExact}` },
@@ -494,6 +495,7 @@ describe("malformed stored frozen contexts", () => {
     const thread = { ...existingThread(), compressedContext };
     vi.spyOn(repository, "getThread").mockReturnValue(thread);
     expect(prompts.assembleThreadPrompt(thread, parent, [])).toEqual([
+      { role: "system", content: prompts.MAIN_SYSTEM_PROMPT },
       { role: "system", content: "Frozen main conversation briefing:\nNo briefing is available." },
       { role: "assistant", content: parent.content },
       { role: "system", content: `Thread subject:\n${thread.anchorExact}` },

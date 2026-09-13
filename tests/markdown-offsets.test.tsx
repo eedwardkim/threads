@@ -6,6 +6,7 @@ import remarkMath from "remark-math";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { validateAnchor } from "../lib/anchors";
 import { mapSelectionToSource, rehypeSourcePositions } from "../lib/markdown-offsets";
+import { normalizeMathDelimiters } from "../lib/math";
 import type { Thread } from "../lib/types";
 
 function renderMarkdown(
@@ -579,6 +580,20 @@ describe("math source mapping", () => {
     document.body.append(root);
     return root;
   }
+
+  it("renders normalized LaTeX and maps anchors against the finalized source", () => {
+    const source = normalizeMathDelimiters(String.raw`Inline \(x^2\). Display \[\binom{15}{3}=\boxed{455}\] Text after math.`);
+    const start = source.indexOf("Text after math.");
+    const anchor = thread(source, start, source.length);
+    const root = renderMath(source, { anchors: [anchor] });
+    expect(root.querySelectorAll(".katex")).toHaveLength(2);
+    expect(root.querySelectorAll(".katex-display")).toHaveLength(1);
+    expect(root.querySelector(".katex-error")).toBeNull();
+    expect(element(root, ".md-anchor").textContent).toBe("Text after math.");
+    const after = textNode(root, "Text after math.");
+    expectMapping(root, contents(after), source, start, source.length);
+    expectVerifiedLeaves(root, source);
+  });
 
   it("renders inline and block math without crashing offset mapping around a thread anchor", () => {
     const source = "Energy is $E = mc^2$ in this note.\n\n$$\n\\int_0^1 x\\,dx\n$$\n\nPlain text after math.";

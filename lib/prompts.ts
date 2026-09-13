@@ -1,7 +1,7 @@
 import { parseFrozenContext } from "./context";
 import type { Briefing, Message, PromptMessage, Thread } from "./types";
 
-export const MAIN_SYSTEM_PROMPT = "You are a thoughtful, precise assistant. Answer the user's request directly, and use Markdown where it improves clarity.";
+export const MAIN_SYSTEM_PROMPT = "You are a thoughtful, precise assistant. Answer the user's request directly, and use Markdown where it improves clarity. For math, use $...$ for inline expressions and $$ delimiters on separate lines for display equations, never \\(...\\) or \\[...\\].";
 
 export function assembleMainPrompt(messages: Message[]): PromptMessage[] {
   return [
@@ -40,6 +40,7 @@ function threadConversation(thread: Thread, history: Message[]): PromptMessage[]
 
 export function assembleThreadPrompt(thread: Thread, parent: Message, history: Message[]): PromptMessage[] {
   return [
+    { role: "system", content: MAIN_SYSTEM_PROMPT },
     { role: "system", content: frozenContext(thread.compressedContext) },
     { role: "assistant", content: parent.content },
     ...threadConversation(thread, history),

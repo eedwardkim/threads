@@ -172,6 +172,34 @@ describe("generation API with an in-memory repository", () => {
     expect(() => assertIdle()).not.toThrow();
   });
 
+  it.each([false, true])("normalizes successful math before completing a message (thread: %s)", async (inThread) => {
+    const threadId = inThread ? branch().id : null;
+    const raw = String.raw`Answer: \(x^2\).`;
+    vi.mocked(provider.streamChat).mockImplementation(async function* () {
+      yield { type: "text", text: raw.slice(0, 10) };
+      yield { type: "text", text: raw.slice(10) };
+      expect(repository.listMessages(chatId, threadId).at(-1)).toMatchObject({ content: raw, complete: false });
+      yield { type: "usage", inputTokens: 17, outputTokens: 4 };
+    });
+    const result = await events(await generate({ threadId, content: raw }));
+    const saved = repository.listMessages(chatId, threadId).at(-1);
+    expect(saved).toMatchObject({ content: "Answer: $x^2$.", complete: true, inputTokens: 17, outputTokens: 4 });
+    expect(result.at(-1)).toEqual({ type: "finish", message: saved });
+    expect(repository.listMessages(chatId, threadId).find((message) => message.role === "user")?.content).toBe(raw);
+  });
+
+  it.each(["error", "abort"])("preserves raw partial math after %s", async (failure) => {
+    const raw = String.raw`Answer: \(x^2\), then \[unfinished`;
+    vi.mocked(provider.streamChat).mockImplementation(async function* () {
+      yield { type: "text", text: raw };
+      if (failure === "abort") stopGeneration();
+      else throw new Error("Interrupted");
+    });
+    const result = await events(await generate());
+    expect(repository.listMessages(chatId).at(-1)).toMatchObject({ content: raw, complete: false });
+    expect(result.at(-1)).toMatchObject({ type: "finish", message: { content: raw, complete: false } });
+  });
+
   it("preserves Unicode when provider chunks split a surrogate pair", async () => {
     vi.mocked(provider.streamChat).mockImplementation(async function* () {
       yield { type: "text", text: "A \ud834" };
@@ -192,6 +220,7 @@ describe("generation API with an in-memory repository", () => {
     expect(vi.mocked(provider.streamChat).mock.calls[0][0].messages.some((message) => message.content === "Thread-only history")).toBe(false);
     await events(await generate({ threadId: thread.id, content: "Thread request" }));
     expect(vi.mocked(provider.streamChat).mock.calls[1][0].messages).toEqual([
+      { role: "system", content: MAIN_SYSTEM_PROMPT },
       { role: "system", content: "Frozen main conversation briefing:\nNo briefing is available." },
       { role: "assistant", content: parent.content },
       { role: "system", content: `Thread subject:\n${thread.anchorExact}` },
@@ -533,6 +562,23 @@ describe("component-independent stream store", () => {
     expect(current).toMatchObject({ active: false, locked: false });
     expect(current.sessions.get(null)).toMatchObject({ phase: "idle", message: { content: "漢字 text", complete: true, inputTokens: 4, outputTokens: 2 }, userMessage });
     expect(refresh).toHaveBeenCalledOnce();
+  });
+
+  it("replaces raw streamed math with the authoritative normalized finish content", async () => {
+    const response = wire();
+    fetchMock.mockResolvedValueOnce(response.response);
+    const message = row();
+    const raw = String.raw`Answer: \(x^2\).`;
+    await act(async () => {
+      await streamStore.send({ chatId: "chat", threadId: null, content: "Question", modelKey: "fast" });
+      response.push({ type: "start", message, userMessage: null }, { type: "delta", messageId: message.id, text: raw });
+    });
+    expect(current.sessions.get(null)?.message?.content).toBe(raw);
+    await act(async () => {
+      response.push({ type: "finish", message: { ...message, content: "Answer: $x^2$.", complete: true } });
+      response.controller.close();
+    });
+    expect(current.sessions.get(null)).toMatchObject({ phase: "idle", message: { content: "Answer: $x^2$.", complete: true } });
   });
 
   it("keeps reading when the observing component unmounts", async () => {

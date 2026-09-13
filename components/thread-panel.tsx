@@ -3,6 +3,8 @@
 import { useEffect, useMemo, useRef } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import remarkMath from "remark-math";
+import rehypeKatex from "rehype-katex";
 import { ArrowLeft, Check, TextQuote, Trash2, X } from "lucide-react";
 import { mergeMessages } from "@/lib/merge-messages";
 import { useStreams } from "@/lib/stream-store";
@@ -86,7 +88,7 @@ export function ThreadPanel({ id, data, narrow, unavailable, providerStatus, err
     </div></div>
     {narrow && <ProviderBanner status={providerStatus} errorCode={errorCode} />}
     {data ? <>
-      <div className="thread-context-header"><div className="quote-label"><span>From the main conversation</span>{data.thread.resolved && <span className="resolved-label">Resolved</span>}</div><blockquote className="thread-quote"><ReactMarkdown remarkPlugins={[remarkGfm]}>{data.thread.anchorExact}</ReactMarkdown></blockquote>
+      <div className="thread-context-header"><div className="quote-label"><span>From the main conversation</span>{data.thread.resolved && <span className="resolved-label">Resolved</span>}</div><blockquote className="thread-quote"><ReactMarkdown remarkPlugins={[remarkGfm, remarkMath]} rehypePlugins={[rehypeKatex]}>{data.thread.anchorExact}</ReactMarkdown></blockquote>
         {!data.thread.anchorValid && <p className="anchor-warning">This anchor could not be verified. The thread is saved here without a highlight.</p>}
         <ContextMeter context={data.context} locked={streams.locked} onRefresh={onRefreshContext} />
       </div>
