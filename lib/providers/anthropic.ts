@@ -21,7 +21,8 @@ export function createAnthropicProvider({ apiKey }: AnthropicOptions): ChatProvi
         allowSystemInMessages: false,
         abortSignal: signal,
         maxRetries: 0,
-        temperature: 0,
+        maxOutputTokens: model.key === "opus" ? 32_000 : undefined,
+        temperature: model.key === "opus" ? undefined : 0,
         onError: () => {},
       });
       yield* consumeStream(result.fullStream, signal, "Claude");

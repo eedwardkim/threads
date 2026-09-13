@@ -1,5 +1,6 @@
 import { apiError, requiredId } from "@/lib/api";
 import { getRepository } from "@/lib/db/repository";
+import { ensureDemoChat } from "@/lib/seed";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -9,6 +10,8 @@ export async function GET(request: Request) {
     const params = new URL(request.url).searchParams;
     const chatId = requiredId(params.get("chatId"));
     const query = (params.get("q") ?? "").slice(0, 300);
-    return Response.json({ results: getRepository().searchMessages(chatId, query) });
+    const repository = getRepository();
+    if (query.trim()) await ensureDemoChat(repository, chatId);
+    return Response.json({ results: repository.searchMessages(chatId, query) });
   } catch (error) { return apiError(error); }
 }

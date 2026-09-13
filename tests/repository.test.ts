@@ -58,6 +58,34 @@ describe("ChatRepository", () => {
     expect(repository.getChat(chat.id)?.title).toBe(content.slice(0, 60));
   });
 
+  it("renames a conversation without changing its location, messages, or thread anchors", () => {
+    const folder = repository.createFolder("Work");
+    const chat = repository.moveChat(repository.createChat().id, folder.id);
+    const parent = assistant(chat.id);
+    const branch = thread(parent);
+    expect(repository.renameChat(chat.id, "  Planning notes  ")).toEqual({ ...chat, title: "Planning notes" });
+    expect(repository.getChat(chat.id)?.title).toBe("Planning notes");
+    expect(repository.getMessage(parent.id)).toEqual(parent);
+    expect(repository.getThread(branch.id)).toEqual(branch);
+  });
+
+  it("preserves a custom name when the first main message arrives", () => {
+    const chat = repository.createChat();
+    repository.renameChat(chat.id, "My project");
+    repository.appendMessage({ chatId: chat.id, threadId: null, role: "user", content: "A different first question", modelKey: null });
+    expect(repository.getChat(chat.id)?.title).toBe("My project");
+  });
+
+  it.each(["", "   ", null, 42])("rejects invalid conversation names: %s", (title) => {
+    const chat = repository.createChat();
+    expect(() => repository.renameChat(chat.id, title as string)).toThrow(AppError);
+    expect(repository.getChat(chat.id)).toEqual(chat);
+  });
+
+  it("reports a missing conversation when renaming", () => {
+    expect(() => repository.renameChat("missing", "New name")).toThrowError(expect.objectContaining({ status: 404, code: "chat_not_found" }));
+  });
+
   it("isolates main, thread, sibling-thread, and other-chat messages in both directions", () => {
     const chat = repository.createChat();
     const otherChat = repository.createChat();

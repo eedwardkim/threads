@@ -78,8 +78,8 @@ export function Composer({ chatId, threadId, messages, disabled = false, focusOn
                 const available = providerStatus.mock || providerStatus[providerId];
                 return <SelectGroup key={providerId}>
                   <SelectLabel>{PROVIDER_LABEL[providerId]}</SelectLabel>
-                  {models.map((entry) => <SelectItem key={entry.key} value={entry.key} disabled={!available}>
-                    <span className="model-option"><span>{entry.label}</span><small>{entry.description}</small></span>
+                  {models.map((entry) => <SelectItem key={entry.key} value={entry.key} disabled={!available} title={entry.description}>
+                    <span className="model-option"><span>{entry.label}</span><small>{entry.id}</small></span>
                   </SelectItem>)}
                 </SelectGroup>;
               })}

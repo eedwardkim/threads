@@ -8,6 +8,7 @@ import { normalizeMathDelimiters } from "../../../lib/math";
 import { isModelKey, type ModelKey } from "../../../lib/models";
 import { assembleMainPrompt, assembleThreadPrompt } from "../../../lib/prompts";
 import { getProviderStatus, requireProviderAvailable, streamChat } from "../../../lib/provider";
+import { ensureDemoChat } from "../../../lib/seed";
 import type { Message, StreamEvent } from "../../../lib/types";
 
 export const runtime = "nodejs";
@@ -32,6 +33,7 @@ export async function POST(request: Request): Promise<Response> {
     if (!status.mock) requireProviderAvailable(input.modelKey, status);
     const repository = getRepository();
     if (!repository.getChat(input.chatId)) throw new AppError("This conversation no longer exists.", 404, "chat_not_found");
+    await ensureDemoChat(repository, input.chatId);
     const thread = input.threadId === null ? null : repository.getThread(input.threadId);
     if (input.threadId !== null && (!thread || thread.chatId !== input.chatId)) {
       throw new AppError("Thread not found in this chat.", 404, "thread_not_found");

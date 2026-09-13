@@ -48,6 +48,6 @@ export function useModelPreference(scope: string, fallback: ModelKey) {
 }
 
 export function useThemePreference() {
-  const theme = useSyncExternalStore<"dark" | "light">(subscribe, () => read("threads:theme") === "light" ? "light" : "dark", () => "dark");
+  const theme = useSyncExternalStore<"dark" | "light">(subscribe, () => read("threads:theme") === "dark" ? "dark" : "light", () => "light");
   return [theme, () => save("threads:theme", theme === "dark" ? "light" : "dark")] as const;
 }

@@ -1,8 +1,17 @@
+import { z } from "zod";
 import { getRepository } from "@/lib/db/repository";
-import { apiError, assertLocalRequest, requiredId } from "@/lib/api";
+import { apiError, assertLocalRequest, readBody, requiredId } from "@/lib/api";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
+
+const nameSchema = z.string().trim().min(1);
+const parentIdSchema = z.string().min(1).max(100).nullable();
+const createSchema = z.object({ name: nameSchema, parentId: parentIdSchema.optional() }).strict();
+const patchSchema = z.union([
+  z.object({ name: nameSchema }).strict(),
+  z.object({ parentId: parentIdSchema }).strict(),
+]);
 
 export async function GET() {
   try {
@@ -14,8 +23,7 @@ export async function GET() {
 
 export async function POST(request: Request) {
   try {
-    assertLocalRequest(request);
-    const body = await request.json();
+    const body = await readBody(request, createSchema);
     const folder = getRepository().createFolder(body.name, body.parentId ?? null);
     return Response.json({ folder }, { status: 201 });
   } catch (error) {
@@ -25,10 +33,10 @@ export async function POST(request: Request) {
 
 export async function PATCH(request: Request) {
   try {
-    assertLocalRequest(request);
+    const body = await readBody(request, patchSchema);
     const id = requiredId(new URL(request.url).searchParams.get("id"));
-    const body = await request.json();
-    const folder = getRepository().renameFolder(id, body.name);
+    const repository = getRepository();
+    const folder = "name" in body ? repository.renameFolder(id, body.name) : repository.moveFolder(id, body.parentId);
     return Response.json({ folder });
   } catch (error) {
     return apiError(error);

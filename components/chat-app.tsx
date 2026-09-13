@@ -1,11 +1,12 @@
 "use client";
 
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { Menu, Plus } from "lucide-react";
+import { Menu, Pencil, Plus } from "lucide-react";
 import { ProviderBanner } from "./provider-banner";
 import { Toaster, toast } from "sonner";
 import { requestJson, errorText } from "@/lib/client-api";
 import { mergeMessages } from "@/lib/merge-messages";
+import { demoChat } from "@/lib/demo-catalog";
 import { useThemePreference } from "@/lib/preferences";
 import { streamStore, useStreams } from "@/lib/stream-store";
 import { useNarrowScreen } from "@/lib/use-narrow-screen";
@@ -14,6 +15,7 @@ import { Sidebar } from "./sidebar";
 import { SearchPanel } from "./search-panel";
 import { ChatSwitcher } from "./chat-switcher";
 import { MoveToDialog } from "./move-to-dialog";
+import { NameDialog } from "./name-dialog";
 import { Composer } from "./composer";
 import { MessageList, type MessageFocus } from "./message-list";
 import { SelectionReply, type SpanSelection } from "./selection-reply";
@@ -22,7 +24,8 @@ import { Logo } from "./logo";
 import { Button } from "./ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "./ui/dialog";
 
-type DeleteTarget = { kind: "chat" | "thread"; id: string; title: string };
+type DeleteTarget = { kind: "chat" | "thread" | "folder"; id: string; title: string };
+type NameTarget = { kind: "chat"; chat: Chat } | { kind: "folder"; folder: Folder } | { kind: "new-folder"; parentId: string | null };
 
 function updateLocation(chatId: string | null, threadId: string | null) {
   const params = new URLSearchParams();
@@ -31,24 +34,10 @@ function updateLocation(chatId: string | null, threadId: string | null) {
   window.history.replaceState(null, "", `${window.location.pathname}${params.size ? `?${params}` : ""}`);
 }
 
-function EditableTitle({ title, disabled, onSave }: { title: string; disabled: boolean; onSave: (title: string) => void }) {
-  const [editing, setEditing] = useState(false);
-  const [draft, setDraft] = useState(title);
-  const inputRef = useRef<HTMLInputElement>(null);
-  useEffect(() => { setDraft(title); }, [title]);
-  useEffect(() => { if (editing) inputRef.current?.select(); }, [editing]);
-  function commit() {
-    const trimmed = draft.trim();
-    if (trimmed && trimmed !== title) onSave(trimmed);
-    setEditing(false);
-  }
+function EditableTitle({ title, disabled, onRename }: { title: string; disabled: boolean; onRename: () => void }) {
   return <div className="editable-title-wrap">
     <span className="header-eyebrow">Main conversation</span>
-    <div className={`editable-title${disabled ? "" : " editable"}`} onClick={() => { if (!disabled && !editing) { setDraft(title); setEditing(true); } }}>
-      {editing
-        ? <input ref={inputRef} className="editable-title-input" value={draft} onChange={(e) => setDraft(e.target.value)} onBlur={commit} onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); commit(); } if (e.key === "Escape") { setDraft(title); setEditing(false); } }} />
-        : <h1>{title}</h1>}
-    </div>
+    <h1><button className="editable-title" disabled={disabled} onClick={onRename} aria-label={`Rename conversation: ${title}`} title="Rename conversation"><span>{title}</span>{!disabled && <Pencil size={12} />}</button></h1>
   </div>;
 }
 
@@ -66,7 +55,9 @@ export function ChatApp({ initialData, providerStatus, initialThread = null }: {
   const [mainFocus, setMainFocus] = useState<MessageFocus | null>(null);
   const [threadFocus, setThreadFocus] = useState<MessageFocus | null>(null);
   const [deleting, setDeleting] = useState<DeleteTarget | null>(null);
+  const [naming, setNaming] = useState<NameTarget | null>(null);
   const [deletePending, setDeletePending] = useState(false);
+  const [restoringDemo, setRestoringDemo] = useState(false);
   const [threadPending, setThreadPending] = useState(false);
   const threadPendingRef = useRef(false);
   const currentId = useRef(current?.chat.id ?? null);
@@ -77,8 +68,6 @@ export function ChatApp({ initialData, providerStatus, initialThread = null }: {
   const returnFocus = useRef<HTMLElement | null>(null);
   const [theme, toggleTheme] = useThemePreference();
   const narrow = useNarrowScreen();
-  const [sidebarWidth, setSidebarWidth] = useState(220);
-  const [threadWidth, setThreadWidth] = useState(340);
   const sidebarWidthRef = useRef(220);
   const threadWidthRef = useRef(340);
   const shellRef = useRef<HTMLDivElement>(null);
@@ -93,19 +82,14 @@ export function ChatApp({ initialData, providerStatus, initialThread = null }: {
   }, [streams.notice]);
 
   useLayoutEffect(() => {
-    const el = shellRef.current;
-    if (!el) return;
-    el.style.setProperty('--sidebar-width', `${sidebarWidth}px`);
-    el.style.setProperty('--thread-width', `${threadWidth}px`);
-  }, [sidebarWidth, threadWidth]);
-
-  useLayoutEffect(() => {
     try {
-      const sw = localStorage.getItem('threads:sidebar-width');
-      const tw = localStorage.getItem('threads:thread-width');
-      if (sw) { const n = Number(sw); if (n >= 160 && n <= 400) { setSidebarWidth(n); sidebarWidthRef.current = n; } }
-      if (tw) { const n = Number(tw); if (n >= 260 && n <= 600) { setThreadWidth(n); threadWidthRef.current = n; } }
+      const sw = Number(localStorage.getItem('threads:sidebar-width'));
+      const tw = Number(localStorage.getItem('threads:thread-width'));
+      if (sw >= 160 && sw <= 400) sidebarWidthRef.current = sw;
+      if (tw >= 260 && tw <= 600) threadWidthRef.current = tw;
     } catch {}
+    shellRef.current?.style.setProperty('--sidebar-width', `${sidebarWidthRef.current}px`);
+    shellRef.current?.style.setProperty('--thread-width', `${threadWidthRef.current}px`);
   }, []);
 
   const startResize = useCallback((panel: 'sidebar' | 'thread', startX: number) => {
@@ -129,8 +113,6 @@ export function ChatApp({ initialData, providerStatus, initialThread = null }: {
       document.body.style.removeProperty('cursor');
       document.body.style.removeProperty('user-select');
       if (threadShell) threadShell.style.transition = '';
-      setSidebarWidth(sidebarWidthRef.current);
-      setThreadWidth(threadWidthRef.current);
       try {
         localStorage.setItem('threads:sidebar-width', String(sidebarWidthRef.current));
         localStorage.setItem('threads:thread-width', String(threadWidthRef.current));
@@ -211,14 +193,14 @@ export function ChatApp({ initialData, providerStatus, initialThread = null }: {
       if (event.defaultPrevented) return;
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "f") { event.preventDefault(); showSearch(); return; }
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") { event.preventDefault(); setSwitcherOpen(true); return; }
-      if (event.key !== "Escape" || deleting || switcherOpen || movingChatId) return;
+      if (event.key !== "Escape" || deleting || naming || switcherOpen || movingChatId || movingFolderId) return;
       if (searchOpen) { event.preventDefault(); closeSearch(); }
       else if (threadId.current || threadPendingRef.current) { event.preventDefault(); closeThread(); }
       else setMobileOpen(false);
     };
     window.addEventListener("keydown", keyboard);
     return () => window.removeEventListener("keydown", keyboard);
-  }, [closeThread, closeSearch, showSearch, searchOpen, switcherOpen, deleting, movingChatId]);
+  }, [closeThread, closeSearch, showSearch, searchOpen, switcherOpen, deleting, naming, movingChatId, movingFolderId]);
 
   const selectChat = useCallback(async (id: string) => {
     const version = ++loadVersion.current;
@@ -236,50 +218,34 @@ export function ChatApp({ initialData, providerStatus, initialThread = null }: {
     } catch (error) { toast.error(errorText(error)); }
   }, [closeThread, closeSearch]);
 
-  const newChat = useCallback(async () => {
+  const newChat = useCallback(async (folderId: string | null = null) => {
     try {
-      const { chat } = await requestJson<{ chat: Chat }>("/api/chats", { method: "POST" });
+      const { chat } = await requestJson<{ chat: Chat }>("/api/chats", { method: "POST", body: JSON.stringify({ folderId }) });
       setChats((existing) => [chat, ...existing]);
       await selectChat(chat.id);
     } catch (error) { toast.error(errorText(error)); }
   }, [selectChat]);
 
-  const createFolder = useCallback(async (name?: string) => {
-    try {
-      const { folder } = await requestJson<{ folder: Folder }>("/api/folders", { method: "POST", body: JSON.stringify({ name: name ?? "New folder" }) });
-      setFolders((existing) => [...existing, folder]);
-      return folder;
-    } catch (error) { toast.error(errorText(error)); throw error; }
+  const createFolder = useCallback(async (name: string, parentId: string | null = null) => {
+    const { folder } = await requestJson<{ folder: Folder }>("/api/folders", { method: "POST", body: JSON.stringify({ name, parentId }) });
+    setFolders((existing) => [...existing, folder]);
+    return folder;
   }, []);
 
   const renameFolder = useCallback(async (id: string, name: string) => {
-    try {
-      const { folder } = await requestJson<{ folder: Folder }>(`/api/folders?id=${encodeURIComponent(id)}`, { method: "PATCH", body: JSON.stringify({ name }) });
-      setFolders((existing) => existing.map((f) => f.id === folder.id ? folder : f));
-    } catch (error) { toast.error(errorText(error)); }
+    const { folder } = await requestJson<{ folder: Folder }>(`/api/folders?id=${encodeURIComponent(id)}`, { method: "PATCH", body: JSON.stringify({ name }) });
+    setFolders((existing) => existing.map((item) => item.id === folder.id ? folder : item));
   }, []);
 
   const moveFolder = useCallback(async (id: string, parentId: string | null) => {
-    try {
-      const { folder } = await requestJson<{ folder: Folder }>(`/api/folders?id=${encodeURIComponent(id)}`, { method: "PATCH", body: JSON.stringify({ parentId }) });
-      setFolders((existing) => existing.map((f) => f.id === folder.id ? folder : f));
-    } catch (error) { toast.error(errorText(error)); }
-  }, []);
-
-  const deleteFolder = useCallback(async (id: string) => {
-    try {
-      await requestJson(`/api/folders?id=${encodeURIComponent(id)}`, { method: "DELETE" });
-      setFolders((existing) => existing.filter((f) => f.id !== id));
-      setChats((existing) => existing.map((c) => c.folderId === id ? { ...c, folderId: null } : c));
-    } catch (error) { toast.error(errorText(error)); }
+    const { folder } = await requestJson<{ folder: Folder }>(`/api/folders?id=${encodeURIComponent(id)}`, { method: "PATCH", body: JSON.stringify({ parentId }) });
+    setFolders((existing) => existing.map((item) => item.id === folder.id ? folder : item));
   }, []);
 
   const renameChat = useCallback(async (chatId: string, title: string) => {
-    try {
-      const { chat } = await requestJson<{ chat: Chat }>(`/api/chats?id=${encodeURIComponent(chatId)}`, { method: "PATCH", body: JSON.stringify({ title }) });
-      setChats((existing) => existing.map((c) => c.id === chat.id ? chat : c));
-      if (currentId.current === chat.id) setCurrent((data) => data ? { ...data, chat } : data);
-    } catch (error) { toast.error(errorText(error)); }
+    const { chat } = await requestJson<{ chat: Chat }>(`/api/chats?id=${encodeURIComponent(chatId)}`, { method: "PATCH", body: JSON.stringify({ title }) });
+    setChats((existing) => existing.map((item) => item.id === chat.id ? chat : item));
+    setCurrent((data) => data?.chat.id === chat.id ? { ...data, chat } : data);
   }, []);
 
   const renameThread = useCallback(async (threadId: string, title: string) => {
@@ -290,10 +256,9 @@ export function ChatApp({ initialData, providerStatus, initialThread = null }: {
   }, []);
 
   const moveChat = useCallback(async (chatId: string, folderId: string | null) => {
-    try {
-      const { chat } = await requestJson<{ chat: Chat }>(`/api/chats?id=${encodeURIComponent(chatId)}`, { method: "PATCH", body: JSON.stringify({ folderId }) });
-      setChats((existing) => existing.map((c) => c.id === chat.id ? chat : c));
-    } catch (error) { toast.error(errorText(error)); }
+    const { chat } = await requestJson<{ chat: Chat }>(`/api/chats?id=${encodeURIComponent(chatId)}`, { method: "PATCH", body: JSON.stringify({ folderId }) });
+    setChats((existing) => existing.map((item) => item.id === chat.id ? chat : item));
+    setCurrent((data) => data?.chat.id === chat.id ? { ...data, chat } : data);
   }, []);
 
   const replyToSelection = useCallback(async (selection: SpanSelection) => {
@@ -360,42 +325,87 @@ export function ChatApp({ initialData, providerStatus, initialThread = null }: {
     } catch (error) { toast.error(errorText(error)); }
   }
 
+  async function restoreDemo() {
+    if (restoringDemo || streams.locked) return;
+    setRestoringDemo(true);
+    try {
+      const result = await requestJson<{ addedFolders: number; addedChats: number }>("/api/demo", { method: "POST", body: JSON.stringify({ action: "restore" }) });
+      await refresh();
+      toast.success(result.addedFolders || result.addedChats ? "Demo library restored. Existing conversations were kept." : "All demo folders and chats are already present.");
+    } catch (error) { toast.error(errorText(error)); }
+    finally { setRestoringDemo(false); }
+  }
+
+  async function saveName(name: string) {
+    if (naming?.kind === "chat") await renameChat(naming.chat.id, name);
+    else if (naming?.kind === "folder") await renameFolder(naming.folder.id, name);
+    else if (naming?.kind === "new-folder") await createFolder(name, naming.parentId);
+  }
+
   async function deleteItem() {
     if (!deleting || streams.locked) return;
     setDeletePending(true);
     try {
-      await requestJson(`/api/${deleting.kind === "chat" ? "chats" : "threads"}?id=${encodeURIComponent(deleting.id)}`, { method: "DELETE" });
+      const resource = deleting.kind === "chat" ? "chats" : deleting.kind === "folder" ? "folders" : "threads";
+      await requestJson(`/api/${resource}?id=${encodeURIComponent(deleting.id)}`, { method: "DELETE" });
       if (deleting.kind === "chat" && currentId.current === deleting.id) { currentId.current = null; closeThread(); closeSearch(); }
       if (deleting.kind === "thread" && threadId.current === deleting.id) closeThread();
       setDeleting(null);
       await refresh();
-      toast.success(deleting.kind === "chat" ? "Conversation deleted." : "Thread deleted. The original answer is unchanged.");
+      toast.success(deleting.kind === "chat" ? "Conversation deleted." : deleting.kind === "folder" ? "Folder deleted. Conversations moved to Unsorted." : "Thread deleted. The original answer is unchanged.");
     } catch (error) { toast.error(errorText(error)); }
     finally { setDeletePending(false); }
   }
 
-  const movingChat = movingChatId ? chats.find((c) => c.id === movingChatId) : null;
+  const movingChat = movingChatId ? chats.find((chat) => chat.id === movingChatId) : null;
   const threadOpen = activeThreadId !== null || threadPending;
+  const nameKind = naming?.kind === "chat" ? "conversation" : "folder";
+  const deletingLabel = deleting?.kind === "chat" ? "conversation" : deleting?.kind ?? "conversation";
 
   return (
     <div ref={shellRef} className={`app-shell${threadOpen ? " has-thread" : ""}`} data-theme={theme}>
-      <Sidebar chats={chats} folders={folders} currentChatId={current?.chat.id ?? null} threads={current?.threads ?? []} activeThreadId={activeThreadId} onOpenThread={openThread} onChat={selectChat} onNewChat={newChat} onDeleteChat={(chat) => { setMobileOpen(false); setDeleting({ ...chat, kind: "chat" }); }} onMoveChat={(chatId) => { setMobileOpen(false); setMovingChatId(chatId); }} onRenameFolder={(id, name) => void renameFolder(id, name)} onDeleteFolder={(id) => void deleteFolder(id)} onMoveFolder={(id) => { setMobileOpen(false); setMovingFolderId(id); }} onDropChat={(chatId, folderId) => void moveChat(chatId, folderId)} onRenameChat={(id, title) => void renameChat(id, title)} onRenameThread={(id, title) => void renameThread(id, title)} onDeleteThread={(thread) => { setMobileOpen(false); setDeleting({ ...thread, kind: "thread" }); }} mobileOpen={mobileOpen} onCloseMobile={() => setMobileOpen(false)} theme={theme} onToggleTheme={toggleTheme} locked={streams.locked} searchOpen={searchOpen} onSearch={showSearch} onSwitcher={() => setSwitcherOpen(true)}>
+      <Sidebar chats={chats} folders={folders} currentChatId={current?.chat.id ?? null} threads={current?.threads ?? []} activeThreadId={activeThreadId}
+        onOpenThread={openThread} onChat={selectChat} onNewChat={() => void newChat()}
+        onDeleteChat={(chat) => { setMobileOpen(false); setDeleting({ ...chat, kind: "chat" }); }}
+        onMoveChat={(chatId) => { setMobileOpen(false); setMovingChatId(chatId); }}
+        onRenameChat={(chat) => setNaming({ kind: "chat", chat })}
+        onRenameFolder={(folder) => setNaming({ kind: "folder", folder })}
+        onCreateFolder={(parentId) => setNaming({ kind: "new-folder", parentId })}
+        onDeleteFolder={(id) => { setMobileOpen(false); setDeleting({ kind: "folder", id, title: folders.find((folder) => folder.id === id)?.name ?? "Folder" }); }}
+        onMoveFolder={(id) => { setMobileOpen(false); setMovingFolderId(id); }}
+        onDropChat={(chatId, folderId) => void moveChat(chatId, folderId).catch((error) => toast.error(errorText(error)))}
+        onRenameThread={(id, title) => void renameThread(id, title)}
+        onDeleteThread={(thread) => { setMobileOpen(false); setDeleting({ ...thread, kind: "thread" }); }}
+        mobileOpen={mobileOpen} onCloseMobile={() => setMobileOpen(false)} theme={theme} onToggleTheme={toggleTheme} locked={streams.locked} searchOpen={searchOpen} onSearch={showSearch} onSwitcher={() => setSwitcherOpen(true)}>
         {searchOpen && <SearchPanel key={current?.chat.id ?? "empty"} chatId={current?.chat.id ?? null} onClose={closeSearch} onSelect={openSearchResult} />}
       </Sidebar>
-      {!narrow && <div className="resize-handle" onMouseDown={(e) => { e.preventDefault(); startResize('sidebar', e.clientX); }} onDoubleClick={() => { setSidebarWidth(220); sidebarWidthRef.current = 220; try { localStorage.removeItem('threads:sidebar-width'); } catch {} }} />}
+      {!narrow && <div className="resize-handle" onMouseDown={(e) => { e.preventDefault(); startResize('sidebar', e.clientX); }} onDoubleClick={() => { shellRef.current?.style.setProperty('--sidebar-width', '220px'); sidebarWidthRef.current = 220; try { localStorage.removeItem('threads:sidebar-width'); } catch {} }} />}
       <main className="main-pane" inert={Boolean(narrow && threadOpen)}>
-        <header className="main-header"><div className="main-title"><Button variant="ghost" size="icon" className="mobile-only" aria-label="Open navigation" onClick={() => setMobileOpen(true)}><Menu /></Button><EditableTitle title={current?.chat.title ?? "A fresh page"} disabled={!current} onSave={(title) => current && void renameChat(current.chat.id, title)} /></div></header>
+        <header className="main-header"><div className="main-title"><Button variant="ghost" size="icon" className="mobile-only" aria-label="Open navigation" onClick={() => setMobileOpen(true)}><Menu /></Button><EditableTitle title={current?.chat.title ?? "A fresh page"} disabled={!current} onRename={() => { if (current) setNaming({ kind: "chat", chat: current.chat }); }} /></div>{current && demoChat(current.chat.id) && <span className="demo-chat-badge" title="Prewritten study history. Your own follow-ups are saved normally.">Study demo</span>}</header>
         <ProviderBanner status={providerStatus} errorCode={streams.notice?.code} />
-        {current && messages.length > 0 ? <MessageList key={current.chat.id} chatId={current.chat.id} threadId={null} messages={messages} threads={current.threads} activeThreadId={activeThreadId} onOpenThread={openThread} session={mainSession} locked={streams.locked} focus={mainFocus} /> : <div className="empty-conversation"><Logo size={46} /><h2>A little room to think.</h2><p>Start with a question. Follow the parts<br />that deserve their own thread.</p>{!current && <Button variant="outline" onClick={newChat}><Plus size={16} />Start a conversation</Button>}</div>}
+        {current && messages.length > 0 ? <MessageList key={current.chat.id} chatId={current.chat.id} threadId={null} messages={messages} threads={current.threads} activeThreadId={activeThreadId} onOpenThread={openThread} session={mainSession} locked={streams.locked} focus={mainFocus} /> : <div className="empty-conversation"><Logo size={46} /><h2>A little room to think.</h2><p>Start with a question. Follow the parts<br />that deserve their own thread.</p>{!current && <Button variant="outline" onClick={() => void newChat()}><Plus size={16} />Start a conversation</Button>}</div>}
         {current && <Composer key={`composer:${current.chat.id}`} chatId={current.chat.id} threadId={null} messages={messages} disabled={unavailable} focusOnMount={messages.length === 0} providerStatus={providerStatus} />}
       </main>
-      {!narrow && threadOpen && <div className="resize-handle" onMouseDown={(e) => { e.preventDefault(); startResize('thread', e.clientX); }} onDoubleClick={() => { setThreadWidth(340); threadWidthRef.current = 340; try { localStorage.removeItem('threads:thread-width'); } catch {} }} />}
+      {!narrow && threadOpen && <div className="resize-handle" onMouseDown={(e) => { e.preventDefault(); startResize('thread', e.clientX); }} onDoubleClick={() => { shellRef.current?.style.setProperty('--thread-width', '340px'); threadWidthRef.current = 340; try { localStorage.removeItem('threads:thread-width'); } catch {} }} />}
       <div className={`thread-shell${threadOpen ? " is-open" : ""}`}>{threadOpen && <ThreadPanel key={activeThreadId ?? "pending"} id={activeThreadId ?? "pending"} data={activeThreadId ? threadData : null} narrow={narrow} unavailable={unavailable} providerStatus={providerStatus} errorCode={streams.notice?.code} onClose={closeThread} onResolve={resolveThread} onRefreshContext={updateContext} focus={threadFocus} onCopyToMain={copyToMain} onDelete={() => { if (threadData) setDeleting({ kind: "thread", id: threadData.thread.id, title: threadData.thread.title }); }} />}</div>
-      <SelectionReply messages={messages} locked={streams.locked || unavailable || switcherOpen || Boolean(deleting) || Boolean(movingChatId)} onReply={replyToSelection} />
-      {switcherOpen && <ChatSwitcher chats={chats} folders={folders} currentChatId={current?.chat.id ?? null} onClose={() => setSwitcherOpen(false)} onSelect={selectChat} onNewChat={newChat} onCreateFolder={() => void createFolder()} onMoveChat={(chatId, folderId) => void moveChat(chatId, folderId)} />}
-      {movingChat && <MoveToDialog folders={folders} currentFolderId={movingChat.folderId} onMove={(folderId) => void moveChat(movingChat.id, folderId)} onCreateFolder={async (name) => createFolder(name)} onClose={() => setMovingChatId(null)} />}
-      {movingFolderId && <MoveToDialog folders={folders.filter((f) => { let id: string | null = f.id; while (id) { if (id === movingFolderId) return false; const p = folders.find((x) => x.id === id); id = p?.parentId ?? null; } return true; })} currentFolderId={folders.find((f) => f.id === movingFolderId)?.parentId ?? null} onMove={(folderId) => void moveFolder(movingFolderId, folderId)} onCreateFolder={async (name) => createFolder(name)} onClose={() => setMovingFolderId(null)} />}
-      <Dialog open={Boolean(deleting)} onOpenChange={(open) => { if (!open && !deletePending) setDeleting(null); }}><DialogContent><DialogHeader><DialogTitle>{deleting?.kind === "thread" ? "Delete this thread?" : "Delete this conversation?"}</DialogTitle><DialogDescription>&ldquo;{deleting?.title}&rdquo; {deleting?.kind === "thread" ? "and its messages will be deleted. The original answer stays unchanged." : "and all of its threads and messages will be permanently deleted."}</DialogDescription></DialogHeader><div className="dialog-actions"><Button variant="ghost" onClick={() => setDeleting(null)} disabled={deletePending}>Keep {deleting?.kind === "thread" ? "thread" : "conversation"}</Button><Button variant="destructive" onClick={() => void deleteItem()} disabled={deletePending || streams.locked}>{deletePending ? "Deleting…" : `Delete ${deleting?.kind === "thread" ? "thread" : "conversation"}`}</Button></div></DialogContent></Dialog>
+      <SelectionReply messages={messages} locked={streams.locked || unavailable || switcherOpen || Boolean(deleting) || Boolean(naming) || Boolean(movingChatId) || Boolean(movingFolderId)} onReply={replyToSelection} />
+      {switcherOpen && <ChatSwitcher chats={chats} folders={folders} currentChatId={current?.chat.id ?? null} onClose={() => setSwitcherOpen(false)} onSelect={selectChat} onNewChat={newChat}
+        onRestoreDemo={() => void restoreDemo()} restoringDemo={restoringDemo} restoreDisabled={streams.locked}
+        onCreateFolder={(parentId) => setNaming({ kind: "new-folder", parentId })}
+        onRenameChat={(chat) => setNaming({ kind: "chat", chat })} onRenameFolder={(folder) => setNaming({ kind: "folder", folder })}
+        onMoveChat={(chatId, folderId) => void moveChat(chatId, folderId).catch((error) => toast.error(errorText(error)))} />}
+      {movingChat && <MoveToDialog folders={folders} currentFolderId={movingChat.folderId} onMove={(folderId) => moveChat(movingChat.id, folderId)} onCreateFolder={createFolder} onClose={() => setMovingChatId(null)} />}
+      {movingFolderId && <MoveToDialog itemType="folder" folders={folders.filter((folder) => { let id: string | null = folder.id; while (id) { if (id === movingFolderId) return false; const parent = folders.find((item) => item.id === id); id = parent?.parentId ?? null; } return true; })}
+        currentFolderId={folders.find((folder) => folder.id === movingFolderId)?.parentId ?? null} onMove={(folderId) => moveFolder(movingFolderId, folderId)} onCreateFolder={createFolder} onClose={() => setMovingFolderId(null)} />}
+      {naming && <NameDialog title={naming.kind === "new-folder" ? "New folder" : `Rename ${nameKind}`} label={nameKind === "conversation" ? "Conversation name" : "Folder name"}
+        description={naming.kind === "new-folder" ? `Create a folder in ${folders.find((folder) => folder.id === naming.parentId)?.name ?? "Library"}.` : `Give this ${nameKind} a name that's easy to find. Its contents will stay unchanged.`}
+        initialValue={naming.kind === "chat" ? naming.chat.title : naming.kind === "folder" ? naming.folder.name : ""}
+        submitLabel={naming.kind === "new-folder" ? "Create folder" : "Save name"} onSave={saveName} onClose={() => setNaming(null)} />}
+      <Dialog open={Boolean(deleting)} onOpenChange={(open) => { if (!open && !deletePending) setDeleting(null); }}>
+        <DialogContent><DialogHeader><DialogTitle>Delete this {deletingLabel}?</DialogTitle><DialogDescription>&ldquo;{deleting?.title}&rdquo; {deleting?.kind === "folder" ? "and its subfolders will be deleted. Conversations inside will be kept in Unsorted." : deleting?.kind === "thread" ? "and its messages will be deleted. The original answer stays unchanged." : "and all of its threads and messages will be permanently deleted."}</DialogDescription></DialogHeader>
+          <div className="dialog-actions"><Button variant="ghost" onClick={() => setDeleting(null)} disabled={deletePending}>Keep {deletingLabel}</Button><Button variant="destructive" onClick={() => void deleteItem()} disabled={deletePending || streams.locked}>{deletePending ? "Deleting…" : `Delete ${deletingLabel}`}</Button></div>
+        </DialogContent>
+      </Dialog>
       <Toaster theme={theme} position="top-right" toastOptions={{ className: "threads-toast" }} />
     </div>
   );

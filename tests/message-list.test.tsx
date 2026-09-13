@@ -28,6 +28,16 @@ afterEach(async () => {
   vi.unstubAllGlobals();
 });
 
+it("labels authored examples as prewritten without disguising live follow-ups", async () => {
+  const example: Message = { ...message, chatId: "demo-la-span", role: "assistant", modelKey: null };
+  await act(async () => root.render(<MessageList chatId={example.chatId} threadId={null} messages={[example]} threads={threads} locked={false} />));
+  expect(host.querySelector(".message-author")?.textContent).toBe("Assistant");
+  expect(host.querySelector(".message-model")?.textContent).toBe("Prewritten");
+  await act(async () => root.render(<MessageList chatId={example.chatId} threadId={null} messages={[{ ...example, modelKey: "opus" }]} threads={threads} locked={false} />));
+  expect(host.querySelector(".message-author")?.textContent).not.toBe("Assistant");
+  expect(host.querySelector(".message-model")?.textContent).not.toBe("Prewritten");
+});
+
 it("keeps search highlighting through database refreshes and Strict Mode remounts", async () => {
   const focus = { id: message.id, nonce: 1 };
   const render = (messages: Message[]) => <MessageList chatId="focus-chat" threadId={null} messages={messages} threads={threads} locked={false} focus={focus} />;

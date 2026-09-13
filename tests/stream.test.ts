@@ -10,6 +10,7 @@ import { acquireGeneration, assertIdle, stopGeneration } from "../lib/generation
 import { assembleFullThreadPrompt, assembleThreadPrompt, MAIN_SYSTEM_PROMPT } from "../lib/prompts";
 import * as provider from "../lib/provider";
 import { streamStore, useStreams } from "../lib/stream-store";
+import { seedDatabase } from "../lib/seed";
 import { getThreadData, refreshThreadContext } from "../lib/thread-service";
 import { estimateTokens } from "../lib/tokens";
 import type { Briefing, Message, StreamEvent } from "../lib/types";
@@ -152,6 +153,23 @@ describe("generation API with an in-memory repository", () => {
     append({ role: "user", content: "New main information after the original call" });
     return { parent, thread, question, partial };
   }
+
+  it("hydrates demo history before a direct follow-up without sending thread transcripts to main", async () => {
+    seedDatabase(repository);
+    chatId = "demo-la-span";
+    expect(repository.hasMessages(chatId)).toBe(false);
+    const response = await generate({ content: "My own follow-up" });
+    expect(response.status).toBe(200);
+    await events(response);
+    const main = repository.listMessages(chatId);
+    expect(main).toHaveLength(8);
+    expect(main.at(-2)?.content).toBe("My own follow-up");
+    expect(main.at(-1)?.content).toBe("Saved text");
+    const prompt = vi.mocked(provider.streamChat).mock.calls[0][0].messages;
+    expect(prompt.slice(1)).toEqual(main.slice(0, -1).map(({ role, content }) => ({ role, content })));
+    expect(repository.listThreads(chatId)).toHaveLength(3);
+    expect(provider.compress).not.toHaveBeenCalled();
+  });
 
   it("persists each delta before requesting the next chunk, then saves usage and finishes", async () => {
     vi.mocked(provider.streamChat).mockImplementation(async function* () {
@@ -412,7 +430,7 @@ describe("generation API with an in-memory repository", () => {
     lease.release();
   });
 
-  it.each([[401, "invalid_key"], [429, "rate_limit"], [503, "busy"]] as const)("streams readable errors for synchronous provider failures (%s)", async (statusCode, code) => {
+  it.each([[401, "invalid_key"], [404, "model_unavailable"], [429, "rate_limit"], [503, "busy"]] as const)("streams readable errors for synchronous provider failures (%s)", async (statusCode, code) => {
     vi.mocked(provider.streamChat).mockImplementation(() => { throw Object.assign(new Error("Provider rejected"), { statusCode }); });
     const response = await generate();
     expect(response.status).toBe(200);

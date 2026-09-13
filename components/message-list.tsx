@@ -3,6 +3,7 @@
 import { memo, useLayoutEffect, useMemo, useRef } from "react";
 import { ArrowDown, CornerUpLeft, Pause, RotateCcw, UserRound } from "lucide-react";
 import { DEFAULT_MODEL, PROVIDER_LABEL, modelFor } from "@/lib/models";
+import { demoChat } from "@/lib/demo-catalog";
 import { streamStore, type StreamSession } from "@/lib/stream-store";
 import type { Message, Thread } from "@/lib/types";
 import { Markdown } from "./markdown";
@@ -26,12 +27,13 @@ const MessageCard = memo(function MessageCard({ message, threads, activeThreadId
   const anchors = useMemo(() => threads.filter((thread) => thread.parentMessageId === message.id), [threads, message.id]);
   const selectable = message.role === "assistant" && message.complete && message.threadId === null && !locked;
   const time = new Date(message.createdAt);
+  const prewritten = message.modelKey === null && Boolean(demoChat(message.chatId));
   return (
     <article className={`message ${message.role}-message`} data-message-id={message.id} data-role={message.role} data-complete={String(message.complete)} data-scope={message.threadId ? "thread" : "main"} aria-busy={streaming}>
       <header className="message-header">
         <span className={`message-avatar ${message.role === "assistant" ? "assistant-avatar" : ""}`}>{message.role === "assistant" ? <Logo size={21} /> : <UserRound size={15} />}</span>
-        <span className="message-author">{message.role === "assistant" ? PROVIDER_LABEL[modelFor(message.modelKey ?? DEFAULT_MODEL).provider] : "You"}</span>
-        {message.role === "assistant" && <span className="message-model">{modelFor(message.modelKey ?? DEFAULT_MODEL).label}</span>}
+        <span className="message-author">{message.role === "assistant" ? prewritten ? "Assistant" : PROVIDER_LABEL[modelFor(message.modelKey ?? DEFAULT_MODEL).provider] : "You"}</span>
+        {message.role === "assistant" && <span className="message-model">{prewritten ? "Prewritten" : modelFor(message.modelKey ?? DEFAULT_MODEL).label}</span>}
         <div className="message-actions">
           <time dateTime={time.toISOString()} suppressHydrationWarning>{time.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}</time>
           {message.threadId && onCopyToMain && <Button variant="ghost" size="sm" className="copy-main-button" aria-label="Copy to main chat" title="Copy to main chat" disabled={locked} onClick={() => onCopyToMain(message.id)}><CornerUpLeft />Copy to main</Button>}

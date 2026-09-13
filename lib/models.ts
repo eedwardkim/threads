@@ -1,12 +1,12 @@
 export type ProviderId = "deepseek" | "anthropic" | "openai";
 
 export const MODELS = [
-  { key: "fast", id: "deepseek-flash", label: "Fast", thinking: false, provider: "deepseek", description: "Get to the point" },
-  { key: "thinking", id: "deepseek-flash", label: "Thinking", thinking: true, provider: "deepseek", description: "Take time to reason" },
-  { key: "opus", id: "claude-opus-4-1", label: "Opus", thinking: false, provider: "anthropic", description: "Most capable Claude" },
-  { key: "sonnet", id: "claude-sonnet-4-5", label: "Sonnet", thinking: false, provider: "anthropic", description: "Balanced Claude" },
-  { key: "haiku", id: "claude-haiku-4-5", label: "Haiku", thinking: false, provider: "anthropic", description: "Fastest Claude" },
-  { key: "gpt-5", id: "gpt-5", label: "GPT-5", thinking: false, provider: "openai", description: "OpenAI flagship" },
+  { key: "fast", id: "deepseek-flash", label: "DeepSeek Flash (Fast)", thinking: false, provider: "deepseek", description: "Get to the point" },
+  { key: "thinking", id: "deepseek-flash", label: "DeepSeek Flash (Thinking)", thinking: true, provider: "deepseek", description: "Take time to reason" },
+  { key: "opus", id: "claude-opus-4-8", label: "Opus 4.8", thinking: false, provider: "anthropic", description: "Advanced reasoning" },
+  { key: "sonnet", id: "claude-sonnet-4-5", label: "Sonnet 4.5", thinking: false, provider: "anthropic", description: "Balanced Claude" },
+  { key: "haiku", id: "claude-haiku-4-5", label: "Haiku 4.5", thinking: false, provider: "anthropic", description: "Fastest Claude" },
+  { key: "gpt-5", id: "gpt-5", label: "GPT-5 (original)", thinking: false, provider: "openai", description: "OpenAI flagship" },
   { key: "gpt-5-mini", id: "gpt-5-mini", label: "GPT-5 mini", thinking: false, provider: "openai", description: "Lighter, cheaper GPT-5" },
 ] as const;
 

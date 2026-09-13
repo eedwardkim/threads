@@ -8,7 +8,7 @@ export const metadata: Metadata = {
   description: "A quiet place to think. Keep follow-up conversations anchored to the words that started them.",
 };
 
-export const viewport: Viewport = { width: "device-width", initialScale: 1, themeColor: "#20262F" };
+export const viewport: Viewport = { width: "device-width", initialScale: 1, themeColor: "#f5f7fa" };
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
   return (

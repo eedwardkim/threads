@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { and, asc, count, desc, eq, gt, isNull, lt, max, sql } from "drizzle-orm";
 import { alias } from "drizzle-orm/sqlite-core";
 import { validateAnchor } from "../anchors";
+import { DEMO_SEED_KEY, type DemoFolder } from "../demo-catalog";
 import { AppError } from "../errors";
 import { isModelKey } from "../models";
 import type { Chat, Folder, Message, SearchResult, Thread } from "../types";
@@ -12,7 +13,8 @@ export type AppendMessageInput = Pick<Message, "chatId" | "threadId" | "role" | 
   & Partial<Pick<Message, "complete" | "createdAt">>;
 export type FinishMessageInput = Pick<Message, "content" | "complete">
   & Partial<Pick<Message, "inputTokens" | "outputTokens">>;
-export type InsertThreadInput = Pick<Thread, "parentMessageId" | "anchorStart" | "anchorEnd" | "source" | "compressedContext" | "contextFrozenAt">;
+export type InsertThreadInput = Pick<Thread, "parentMessageId" | "anchorStart" | "anchorEnd" | "source" | "compressedContext" | "contextFrozenAt">
+  & Partial<Pick<Thread, "title" | "createdAt">>;
 export type UpdateThreadInput = Partial<Pick<Thread, "resolved" | "title" | "compressedContext" | "contextFrozenAt">>;
 
 type QueryDatabase = Pick<AppDatabase, "select" | "insert" | "update" | "delete">;
@@ -109,9 +111,13 @@ export class ChatRepository {
   }
 
   moveFolder(id: string, parentId: string | null): Folder {
+    if (!this.db.select({ id: folders.id }).from(folders).where(eq(folders.id, id)).get()) {
+      throw new AppError("Folder not found.", 404, "folder_not_found");
+    }
     if (parentId === id) throw new AppError("A folder cannot be moved into itself.");
     if (parentId !== null) {
       let cur = this.db.select().from(folders).where(eq(folders.id, parentId)).get();
+      if (!cur) throw new AppError("Parent folder not found.", 404, "folder_not_found");
       while (cur) {
         if (cur.id === id) throw new AppError("A folder cannot be moved into one of its children.");
         cur = cur.parentId ? this.db.select().from(folders).where(eq(folders.id, cur.parentId)).get() : undefined;
@@ -125,9 +131,10 @@ export class ChatRepository {
   }
 
   renameChat(chatId: string, title: string): Chat {
-    const trimmed = title.trim();
-    if (!trimmed) throw new AppError("Title must not be empty.");
-    return this.db.update(chats).set({ title: trimmed }).where(eq(chats.id, chatId)).returning().get()!;
+    if (typeof title !== "string" || !title.trim()) throw new AppError("Title must not be empty.");
+    const chat = this.db.update(chats).set({ title: title.trim() }).where(eq(chats.id, chatId)).returning().get();
+    if (!chat) throw new AppError("Chat not found.", 404, "chat_not_found");
+    return chat;
   }
 
   moveChat(chatId: string, folderId: string | null): Chat {
@@ -148,12 +155,18 @@ export class ChatRepository {
     return this.db.select().from(chats).where(eq(chats.id, id)).get() ?? null;
   }
 
-  createChat(): Chat {
-    return this.db.transaction((tx) => tx.insert(chats).values({
-      id: randomUUID(),
-      title: "New chat",
-      createdAt: this.nextCreatedAt(tx, chats),
-    }).returning().get()!, { behavior: "immediate" });
+  createChat(folderId: string | null = null): Chat {
+    return this.db.transaction((tx) => {
+      if (folderId !== null && !tx.select({ id: folders.id }).from(folders).where(eq(folders.id, folderId)).get()) {
+        throw new AppError("Folder not found.", 404, "folder_not_found");
+      }
+      return tx.insert(chats).values({
+        id: randomUUID(),
+        title: "New chat",
+        folderId,
+        createdAt: this.nextCreatedAt(tx, chats),
+      }).returning().get()!;
+    }, { behavior: "immediate" });
   }
 
   deleteChat(id: string): void {
@@ -172,8 +185,12 @@ export class ChatRepository {
     )).orderBy(asc(messages.createdAt), asc(messages.id)).all();
   }
 
-  appendMessage(input: AppendMessageInput): Message {
-    return this.db.transaction((tx) => this.insertMessage(tx, input), { behavior: "immediate" });
+  hasMessages(chatId: string): boolean {
+    return Boolean(this.db.select({ id: messages.id }).from(messages).where(eq(messages.chatId, chatId)).limit(1).get());
+  }
+
+  appendMessage(input: AppendMessageInput, options: { preserveTimestamp?: boolean } = {}): Message {
+    return this.db.transaction((tx) => this.insertMessage(tx, input, options.preserveTimestamp), { behavior: "immediate" });
   }
 
   updatePartialMessage(id: string, content: string): Message {
@@ -246,6 +263,9 @@ export class ChatRepository {
         throw new AppError("This selection overlaps an existing thread anchor.", 409, "anchor_overlap");
       }
       const anchorExact = parent.content.slice(anchorStart, anchorEnd);
+      if (input.title !== undefined && (typeof input.title !== "string" || !input.title.trim())) {
+        throw new AppError("Thread title must not be empty.");
+      }
       const inserted = tx.insert(threads).values({
         id: randomUUID(),
         chatId: parent.chatId,
@@ -257,8 +277,8 @@ export class ChatRepository {
         contextFrozenAt: input.contextFrozenAt,
         source: "user",
         resolved: false,
-        title: anchorExact.slice(0, 60),
-        createdAt: this.nextCreatedAt(tx, threads),
+        title: input.title?.trim() ?? anchorExact.slice(0, 60),
+        createdAt: this.nextCreatedAt(tx, threads, input.createdAt, true),
       }).returning().get()!;
       return { ...inserted, anchorValid: true, messageCount: 0 };
     }, { behavior: "immediate" });
@@ -324,16 +344,45 @@ export class ChatRepository {
     }, { behavior: "immediate" });
   }
 
-  seedOnce(seed: (repository: ChatRepository) => void): void {
+  restoreDemoCatalog(catalog: readonly DemoFolder[]): { addedFolders: number; addedChats: number } {
+    return this.db.transaction((tx) => {
+      let addedFolders = 0;
+      let addedChats = 0;
+      catalog.forEach((folder, sortOrder) => {
+        const added = tx.insert(folders).values({
+          id: folder.id, name: folder.name, parentId: null, sortOrder,
+          createdAt: folder.chats[0].createdAt,
+        }).onConflictDoNothing().run().changes;
+        addedFolders += added;
+        for (const chat of folder.chats) {
+          addedChats += tx.insert(chats).values({ ...chat, folderId: folder.id }).onConflictDoNothing().run().changes;
+          if (added) tx.update(chats).set({ folderId: folder.id }).where(and(eq(chats.id, chat.id), isNull(chats.folderId))).run();
+        }
+      });
+      return { addedFolders, addedChats };
+    }, { behavior: "immediate" });
+  }
+
+  seedChat(chatId: string, seed: (repository: ChatRepository) => void): void {
     this.sqlite.transaction(() => {
-      if (this.sqlite.prepare("SELECT value FROM app_meta WHERE key = 'seeded'").get()) return;
+      if (!this.getChat(chatId) || this.hasMessages(chatId)) return;
       seed(this);
-      this.sqlite.prepare("INSERT INTO app_meta (key, value) VALUES ('seeded', '1')").run();
     }).immediate();
   }
 
-  private nextCreatedAt(db: QueryDatabase, table: typeof chats | typeof messages | typeof threads, requested?: number): number {
-    if (requested !== undefined) validateInteger(requested, "Creation time");
+  seedOnce(seed: (repository: ChatRepository) => void, key = "seeded"): void {
+    this.sqlite.transaction(() => {
+      if (this.sqlite.prepare("SELECT value FROM app_meta WHERE key = ?").get(key)) return;
+      seed(this);
+      this.sqlite.prepare("INSERT INTO app_meta (key, value) VALUES (?, '1')").run(key);
+    }).immediate();
+  }
+
+  private nextCreatedAt(db: QueryDatabase, table: typeof chats | typeof messages | typeof threads, requested?: number, preserveTimestamp = false): number {
+    if (requested !== undefined) {
+      validateInteger(requested, "Creation time");
+      if (preserveTimestamp) return requested;
+    }
     const latest = db.select({ value: max(table.createdAt) }).from(table).get()?.value;
     const next = Math.max(requested ?? Date.now(), (latest ?? -1) + 1);
     validateInteger(next, "Creation time");
@@ -355,8 +404,8 @@ export class ChatRepository {
     if (!thread) throw new AppError("Thread not found in this chat.", 404, "thread_not_found");
   }
 
-  private insertMessage(db: QueryDatabase, input: AppendMessageInput): Message {
-    const chat = db.select({ id: chats.id }).from(chats).where(eq(chats.id, input.chatId)).get();
+  private insertMessage(db: QueryDatabase, input: AppendMessageInput, preserveTimestamp = false): Message {
+    const chat = db.select({ id: chats.id, title: chats.title }).from(chats).where(eq(chats.id, input.chatId)).get();
     if (!chat) throw new AppError("Chat not found.", 404, "chat_not_found");
     if (input.threadId !== null) this.requireThreadScope(db, input.chatId, input.threadId);
     if (input.role !== "user" && input.role !== "assistant") throw new AppError("Message role must be user or assistant.");
@@ -379,9 +428,9 @@ export class ChatRepository {
       complete: input.complete ?? true,
       inputTokens: null,
       outputTokens: null,
-      createdAt: this.nextCreatedAt(db, messages, input.createdAt),
+      createdAt: this.nextCreatedAt(db, messages, input.createdAt, preserveTimestamp),
     }).returning().get()!;
-    if (firstMainUser) {
+    if (firstMainUser && chat.title === "New chat") {
       db.update(chats).set({ title: input.content.slice(0, 60) }).where(eq(chats.id, input.chatId)).run();
     }
     return message;
@@ -414,7 +463,7 @@ const repositoryGlobal = globalThis as typeof globalThis & { __threadsRepository
 export function getRepository(): ChatRepository {
   if (!repositoryGlobal.__threadsRepository) {
     const repository = new ChatRepository(DEFAULT_DATABASE_PATH);
-    repository.seedOnce(seedDatabase);
+    repository.seedOnce(seedDatabase, DEMO_SEED_KEY);
     repositoryGlobal.__threadsRepository = repository;
   }
   return repositoryGlobal.__threadsRepository;
