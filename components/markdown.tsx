@@ -2,7 +2,10 @@
 
 import { memo, useLayoutEffect, useMemo, useRef, type ReactNode } from "react";
 import ReactMarkdown, { type ExtraProps } from "react-markdown";
+import rehypeKatex from "rehype-katex";
 import remarkGfm from "remark-gfm";
+import remarkMath from "remark-math";
+import "katex/dist/katex.min.css";
 import { rehypeSourcePositions } from "@/lib/markdown-offsets";
 import type { Thread } from "@/lib/types";
 import { CopyButton } from "./copy-button";
@@ -39,7 +42,10 @@ export const Markdown = memo(function Markdown({ content, anchors = EMPTY_THREAD
   selectable?: boolean;
 }) {
   const root = useRef<HTMLDivElement>(null);
-  const plugins = useMemo(() => [[rehypeSourcePositions, { source: content, anchors, activeThreadId }] as [typeof rehypeSourcePositions, { source: string; anchors: Thread[]; activeThreadId: string | null }]], [content, anchors, activeThreadId]);
+  const plugins = useMemo(() => [
+    rehypeKatex,
+    [rehypeSourcePositions, { source: content, anchors, activeThreadId }] as [typeof rehypeSourcePositions, { source: string; anchors: Thread[]; activeThreadId: string | null }],
+  ], [content, anchors, activeThreadId]);
   useLayoutEffect(() => {
     const leaves = root.current?.querySelectorAll("[data-md-start]");
     if (!streaming || !leaves?.length) return;
@@ -56,7 +62,7 @@ export const Markdown = memo(function Markdown({ content, anchors = EMPTY_THREAD
           onOpenThread?.(target.dataset.threadId);
         }
       }}>
-      <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={plugins} components={{
+      <ReactMarkdown remarkPlugins={[remarkGfm, remarkMath]} rehypePlugins={plugins} components={{
         pre: CodeBlock,
         a: ({ href, children }) => <a href={href} target="_blank" rel="noreferrer">{children}</a>,
         h1: ({ children }) => <h2 className="md-h1">{children}</h2>,

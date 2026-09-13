@@ -294,10 +294,18 @@ export function rehypeSourcePositions(options: {
       node.children = children;
     }
 
+    function isMathElement(node: Element): boolean {
+      return classes(node).some((name) => name === "math" || name === "math-inline" || name === "math-display" || name === "katex" || name === "katex-display" || name === "katex-error");
+    }
+
     function mapChildren(parent: Container) {
       for (let index = 0; index < parent.children.length; index += 1) {
         const child = parent.children[index];
         if (child.type === "element") {
+          if (isMathElement(child)) {
+            child.properties["data-md-unsafe"] = "true";
+            continue;
+          }
           if (child.tagName === "code") mapCode(child, parent.type === "element" && parent.tagName === "pre");
           else mapChildren(child);
         } else if (child.type === "text" && child.value) {

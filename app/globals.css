@@ -381,6 +381,7 @@ body { overflow: hidden; }
 .code-toolbar { height: 32px; display: flex; align-items: center; justify-content: space-between; padding: 0 9px 0 13px; border-bottom: 1px solid var(--border); color: var(--muted-foreground); font-family: var(--font-sans); font-size: 10px; user-select: none; }
 .code-toolbar .copy-button { font-size: 10px; }
 .markdown pre { margin: 0; padding: 14px; overflow-x: auto; font-family: var(--font-mono); font-size: 11px; line-height: 1.75; tab-size: 2; }
+.markdown .katex-display { margin: 1em 0; overflow-x: auto; overflow-y: hidden; padding: .15em 0; }
 .markdown pre code { font-family: inherit; white-space: pre; }
 .code-token { color: var(--shiki-dark); }
 [data-theme="light"] .code-token { color: var(--shiki-light); }

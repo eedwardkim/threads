@@ -1,6 +1,8 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import ReactMarkdown from "react-markdown";
+import rehypeKatex from "rehype-katex";
 import remarkGfm from "remark-gfm";
+import remarkMath from "remark-math";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { validateAnchor } from "../lib/anchors";
 import { mapSelectionToSource, rehypeSourcePositions } from "../lib/markdown-offsets";
@@ -560,5 +562,42 @@ describe("inline thread anchors", () => {
     expect(marker.previousElementSibling?.classList.contains("code-token")).toBe(true);
     expectMapping(root, contents(code), source, source.indexOf("const"), source.indexOf("\n```", 4) + 1);
     expectVerifiedLeaves(root, source);
+  });
+});
+
+describe("math source mapping", () => {
+  function renderMath(source: string, options: { anchors?: Thread[]; activeThreadId?: string | null } = {}): HTMLDivElement {
+    const root = document.createElement("div");
+    root.innerHTML = renderToStaticMarkup(
+      <ReactMarkdown
+        remarkPlugins={[remarkGfm, remarkMath]}
+        rehypePlugins={[rehypeKatex, [rehypeSourcePositions, { source, ...options }]]}
+      >
+        {source}
+      </ReactMarkdown>,
+    );
+    document.body.append(root);
+    return root;
+  }
+
+  it("renders inline and block math without crashing offset mapping around a thread anchor", () => {
+    const source = "Energy is $E = mc^2$ in this note.\n\n$$\n\\int_0^1 x\\,dx\n$$\n\nPlain text after math.";
+    const start = source.indexOf("this note");
+    const end = start + "this note".length;
+    const anchor = thread(source, start, end);
+    const root = renderMath(source, { anchors: [anchor] });
+    expect(root.querySelector(".katex")).not.toBeNull();
+    expect(root.querySelector(".katex-display")).not.toBeNull();
+    const math = root.querySelectorAll(".katex, .katex-display, .math, .math-inline, .math-display");
+    expect(math.length).toBeGreaterThan(0);
+    for (const node of math) {
+      expect(node.closest("[data-md-unsafe]")).not.toBeNull();
+    }
+    expect(element(root, ".md-anchor").textContent).toBe("this note");
+    expect(element(root, ".anchor-marker").dataset.threadId).toBe(anchor.id);
+    const after = textNode(root, "Plain text after math.");
+    expectMapping(root, between(after, 0, after, after.length), source, source.indexOf("Plain text after math."), source.length);
+    expectVerifiedLeaves(root, source);
+    expect(() => mapSelectionToSource(root, contents(element(root, ".katex")), source)).toThrow();
   });
 });
