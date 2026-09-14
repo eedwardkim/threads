@@ -1,6 +1,7 @@
 import { sql } from "drizzle-orm";
-import { bigint, boolean, date, integer, pgSchema, text, timestamp, uuid } from "drizzle-orm/pg-core";
+import { bigint, boolean, customType, date, integer, pgSchema, text, timestamp, uuid } from "drizzle-orm/pg-core";
 import type { ModelKey } from "../models";
+import type { AttachmentMediaType } from "../types";
 
 // Column constraints, composite owner foreign keys, triggers, and RLS policies are defined in
 // db/migrations/*.sql; this file mirrors the tables for typed queries.
@@ -12,6 +13,12 @@ export const guestSessions = threadsSchema.table("guest_sessions", {
   ownerId: uuid("owner_id").primaryKey(),
   expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
   permanent: boolean("permanent").notNull().default(false),
+});
+
+const bytea = customType<{ data: Uint8Array; driverData: Uint8Array }>({
+  dataType: () => "bytea",
+  toDriver: (value) => value,
+  fromDriver: (value) => new Uint8Array(value),
 });
 
 export const userState = threadsSchema.table("user_state", {
@@ -92,6 +99,23 @@ export const generationJobs = threadsSchema.table("generation_jobs", {
   updatedAt: ms("updated_at").notNull(),
   finishedAt: ms("finished_at"),
   errorCode: text("error_code"),
+});
+
+export const attachments = threadsSchema.table("attachments", {
+  id: text("id").primaryKey(),
+  ownerId: uuid("owner_id").notNull(),
+  chatId: text("chat_id").notNull(),
+  messageId: text("message_id"),
+  name: text("name").notNull(),
+  mediaType: text("media_type").$type<AttachmentMediaType>().notNull(),
+  width: integer("width").notNull(),
+  height: integer("height").notNull(),
+  byteSize: integer("byte_size").notNull(),
+  sha256: text("sha256").notNull(),
+  data: bytea("data").notNull(),
+  digest: text("digest"),
+  digestModel: text("digest_model"),
+  createdAt: ms("created_at").notNull(),
 });
 
 export const rateWindows = threadsSchema.table("rate_windows", {

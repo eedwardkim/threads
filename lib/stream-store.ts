@@ -37,6 +37,7 @@ interface SendInput {
   chatId: string;
   threadId: string | null;
   content?: string;
+  attachmentIds?: string[];
   modelKey: ModelKey;
   retryMessageId?: string;
 }

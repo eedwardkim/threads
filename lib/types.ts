@@ -19,6 +19,20 @@ export interface Chat {
   demoKey: string | null;
 }
 
+export type AttachmentMediaType = "image/png" | "image/jpeg" | "image/webp" | "image/gif";
+
+/** Image metadata shown in the UI and carried into prompts; bytes are fetched separately. */
+export interface Attachment {
+  id: string;
+  name: string;
+  mediaType: AttachmentMediaType;
+  width: number;
+  height: number;
+  byteSize: number;
+  /** Cached structured description; null until a text-only model (or an older turn) first needs it. */
+  digest: string | null;
+}
+
 export interface Message {
   id: string;
   chatId: string;
@@ -30,6 +44,8 @@ export interface Message {
   inputTokens: number | null;
   outputTokens: number | null;
   createdAt: number;
+  /** Images sent with a user message; absent means none. */
+  attachments?: Attachment[];
 }
 
 export interface Thread {
@@ -49,9 +65,18 @@ export interface Thread {
   messageCount: number;
 }
 
+export interface PromptImage {
+  data: Uint8Array;
+  mediaType: AttachmentMediaType;
+}
+
 export interface PromptMessage {
   role: "system" | "user" | "assistant";
   content: string;
+  /** Images the user sent with this turn; how they reach the model is decided at generation time. */
+  attachments?: Attachment[];
+  /** Native image parts for models that see images; set only for the turns chosen by `lib/vision.ts`. */
+  images?: PromptImage[];
 }
 
 export interface Briefing {
