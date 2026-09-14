@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Menu, Pencil, Plus } from "lucide-react";
 import { ProviderBanner } from "./provider-banner";
+import { DeveloperToolsShortcut } from "./developer-tools";
 import { Toaster, toast } from "sonner";
 import { chatCache } from "@/lib/chat-cache";
 import { requestJson, errorText } from "@/lib/client-api";
@@ -47,7 +48,7 @@ export interface ClientUser {
   email: string | null;
 }
 
-export function ChatApp({ initialData, providerStatus, initialThread = null, user, missingChat = false }: { initialData: AppData; providerStatus: ProviderStatus; initialThread?: ThreadData | null; user: ClientUser; missingChat?: boolean }) {
+export function ChatApp({ initialData, providerStatus, initialThread = null, user, missingChat = false, demoEnabled = false }: { initialData: AppData; providerStatus: ProviderStatus; initialThread?: ThreadData | null; user: ClientUser; missingChat?: boolean; demoEnabled?: boolean }) {
   useState(() => {
     bindClientUser(user.id);
     if (initialData.current) chatCache.setChat(initialData.current);
@@ -69,7 +70,6 @@ export function ChatApp({ initialData, providerStatus, initialThread = null, use
   const [deleting, setDeleting] = useState<DeleteTarget | null>(null);
   const [naming, setNaming] = useState<NameTarget | null>(null);
   const [deletePending, setDeletePending] = useState(false);
-  const [restoringDemo, setRestoringDemo] = useState(false);
   const [threadPending, setThreadPending] = useState(false);
   const [loadingChatId, setLoadingChatId] = useState<string | null>(null);
   const threadPendingRef = useRef(false);
@@ -397,17 +397,6 @@ export function ChatApp({ initialData, providerStatus, initialThread = null, use
     } catch (error) { toast.error(errorText(error)); }
   }
 
-  async function restoreDemo() {
-    if (restoringDemo || streams.locked) return;
-    setRestoringDemo(true);
-    try {
-      const result = await requestJson<{ addedFolders: number; addedChats: number }>("/api/demo", { method: "POST", body: JSON.stringify({ action: "restore" }) });
-      await refresh();
-      toast.success(result.addedFolders || result.addedChats ? "Demo library restored. Existing conversations were kept." : "All demo folders and chats are already present.");
-    } catch (error) { toast.error(errorText(error)); }
-    finally { setRestoringDemo(false); }
-  }
-
   async function saveName(name: string) {
     if (naming?.kind === "chat") await renameChat(naming.chat.id, name);
     else if (naming?.kind === "folder") await renameFolder(naming.folder.id, name);
@@ -467,7 +456,8 @@ export function ChatApp({ initialData, providerStatus, initialThread = null, use
       </Sidebar>
       {!narrow && <div className="resize-handle" onMouseDown={(e) => { e.preventDefault(); startResize('sidebar', e.clientX); }} onDoubleClick={() => { shellRef.current?.style.setProperty('--sidebar-width', '220px'); sidebarWidthRef.current = 220; try { localStorage.removeItem('threads:sidebar-width'); } catch {} }} />}
       <main className="main-pane" inert={Boolean(narrow && threadOpen)}>
-        <header className="main-header"><div className="main-title"><Button variant="ghost" size="icon" className="mobile-only" aria-label="Open navigation" onClick={() => setMobileOpen(true)}><Menu /></Button><EditableTitle title={current?.chat.title ?? "A fresh page"} disabled={!current} onRename={() => { if (current) setNaming({ kind: "chat", chat: current.chat }); }} /></div>{current?.chat.demoKey && <span className="demo-chat-badge" title="Prewritten study history. Your own follow-ups are saved normally.">Study demo</span>}</header>
+        <DeveloperToolsShortcut />
+        <header className="main-header"><div className="main-title"><Button variant="ghost" size="icon" className="mobile-only" aria-label="Open navigation" onClick={() => setMobileOpen(true)}><Menu /></Button><EditableTitle title={current?.chat.title ?? "A fresh page"} disabled={!current} onRename={() => { if (current) setNaming({ kind: "chat", chat: current.chat }); }} /></div>{demoEnabled && <a href="/dev-tools" className="text-xs text-muted-foreground underline">Developer tools</a>}{current?.chat.demoKey && <span className="demo-chat-badge" title="Prewritten study history. Your own follow-ups are saved normally.">Study demo</span>}</header>
         <ProviderBanner status={providerStatus} errorCode={streams.notice?.code} />
         {loadingCurrent ? <div className="conversation-skeleton" aria-busy="true" aria-label="Loading conversation"><div className="skeleton-line w-2/3" /><div className="skeleton-line" /><div className="skeleton-line w-5/6" /><div className="skeleton-line w-1/2" /></div>
           : current && messages.length > 0 ? <MessageList key={current.chat.id} chatId={current.chat.id} threadId={null} messages={messages} threads={current.threads} activeThreadId={activeThreadId} onOpenThread={openThread} session={mainSession} locked={streams.locked} focus={mainFocus} /> : <div className="empty-conversation"><Logo size={46} /><h2>A little room to think.</h2><p>Start with a question. Follow the parts<br />that deserve their own thread.</p>{!current && <Button variant="outline" onClick={() => void newChat()}><Plus size={16} />Start a conversation</Button>}</div>}
@@ -477,7 +467,6 @@ export function ChatApp({ initialData, providerStatus, initialThread = null, use
       <div className={`thread-shell${threadOpen ? " is-open" : ""}`}>{threadOpen && <ThreadPanel key={activeThreadId ?? "pending"} id={activeThreadId ?? "pending"} data={activeThreadId ? threadData : null} narrow={narrow} unavailable={unavailable} providerStatus={providerStatus} errorCode={streams.notice?.code} onClose={closeThread} onResolve={resolveThread} onRefreshContext={updateContext} focus={threadFocus} onCopyToMain={copyToMain} onDelete={() => { if (threadData) setDeleting({ kind: "thread", id: threadData.thread.id, title: threadData.thread.title }); }} />}</div>
       <SelectionReply messages={messages} locked={streams.locked || unavailable || switcherOpen || Boolean(deleting) || Boolean(naming) || Boolean(movingChatId) || Boolean(movingFolderId)} onReply={replyToSelection} />
       {switcherOpen && <ChatSwitcher chats={chats} folders={folders} currentChatId={current?.chat.id ?? null} onClose={() => setSwitcherOpen(false)} onSelect={selectChat} onNewChat={newChat}
-        onRestoreDemo={() => void restoreDemo()} restoringDemo={restoringDemo} restoreDisabled={streams.locked}
         onCreateFolder={(parentId) => setNaming({ kind: "new-folder", parentId })}
         onRenameChat={(chat) => setNaming({ kind: "chat", chat })} onRenameFolder={(folder) => setNaming({ kind: "folder", folder })}
         onMoveChat={(chatId, folderId) => void moveChat(chatId, folderId).catch((error) => toast.error(errorText(error)))} />}

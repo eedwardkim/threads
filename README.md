@@ -41,6 +41,12 @@ The importer opens the source read-only (WAL-consistent), preserves ids, text, t
 - **Escape** clears search or closes the open panel.
 - A thread's **Copy to main** control creates a separate, immutable message with the same role and text, without generating a response.
 
+## Developer demos
+
+Sign in and open `/dev-tools` (or press **Ctrl+Alt+D** in a chat) to show/hide the prewritten demo library. Normal sign-in does not seed demos. Previously seeded demos are hidden by default after migration `0004_demo_tools`; they are not deleted. Visibility is an owner-scoped account preference, not an administrator permission.
+
+**Restore and show demo library** adds missing catalog entries without overwriting edits, moved chats, or follow-ups. **Show saved demos** only changes visibility, so deliberately deleted demos stay deleted. Contents still hydrate one conversation at a time. Personal folders and chats filed inside a hidden demo folder appear at the library root without changing their stored placement.
+
 ## Verification
 
 | Command | What it covers |

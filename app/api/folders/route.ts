@@ -15,7 +15,7 @@ const patchSchema = z.union([
 export async function GET() {
   try {
     const { repository } = await withApiUser();
-    return json({ folders: await repository.listFolders() });
+    return json({ folders: (await repository.library(null)).folders });
   } catch (error) {
     return apiError(error);
   }

@@ -3,6 +3,7 @@ import { and, asc, count, desc, eq, gt, isNull, lt, max, sql } from "drizzle-orm
 import { alias, type PgColumn } from "drizzle-orm/pg-core";
 import { validateAnchor } from "../anchors";
 import { AppError } from "../errors";
+import { visibleLibrary } from "../demo-visibility";
 import { isModelKey } from "../models";
 import type { Chat, Folder, Message, SearchResult, Thread } from "../types";
 import type { DatabaseHandle } from "./client";
@@ -202,7 +203,8 @@ export class ChatRepository {
   /** Library and current-chat contents in one round trip. */
   async library(chatId?: string | null): Promise<{ chats: Chat[]; folders: Folder[]; current: { chat: Chat; messages: Message[]; threads: Thread[] } | null }> {
     return this.run(async (tx) => {
-      const [chatList, folderList] = await Promise.all([this.listChats(tx), this.listFolders(tx)]);
+      const [allChats, allFolders, showDemos] = await Promise.all([this.listChats(tx), this.listFolders(tx), this.demoEnabled(tx)]);
+      const { chats: chatList, folders: folderList } = visibleLibrary(allChats, allFolders, showDemos);
       const chat = chatId === null ? undefined : chatList.find((item) => item.id === chatId) ?? chatList[0];
       if (!chat) return { chats: chatList, folders: folderList, current: null };
       const [messageList, threadList] = await Promise.all([this.listMessages(chat.id, null, tx), this.listThreads(chat.id, tx)]);
@@ -469,6 +471,19 @@ export class ChatRepository {
 
   async demoSeedKey(): Promise<string | null> {
     return this.run(async (tx) => (await tx.select({ key: userState.demoSeedKey }).from(userState).where(eq(userState.ownerId, this.userId)))[0]?.key ?? null);
+  }
+
+  async demoEnabled(tx?: Tx): Promise<boolean> {
+    const query = async (db: Tx) => (await db.select({ enabled: userState.demoEnabled }).from(userState)
+      .where(eq(userState.ownerId, this.userId)))[0]?.enabled ?? false;
+    return tx ? query(tx) : this.run(query);
+  }
+
+  async setDemoEnabled(enabled: boolean): Promise<void> {
+    await this.run(async (tx) => {
+      await tx.insert(userState).values({ ownerId: this.userId, demoEnabled: enabled, createdAt: Date.now() })
+        .onConflictDoUpdate({ target: userState.ownerId, set: { demoEnabled: enabled } });
+    });
   }
 
   /**
