@@ -3,6 +3,7 @@ import Link from "next/link";
 import { ArrowUpRight, GitBranch, Timer, Waves } from "lucide-react";
 import { Logo } from "@/components/logo";
 import { LandingPrompt } from "@/components/landing-prompt";
+import { LandingMotion } from "@/components/landing-motion";
 import styles from "./welcome.module.css";
 
 export const metadata: Metadata = {
@@ -13,7 +14,13 @@ export const metadata: Metadata = {
 export default function WelcomePage() {
   return (
     <main className={styles.shell}>
-      <div className={styles.atmosphere} aria-hidden="true" />
+      <LandingMotion />
+      <div className={styles.atmosphere} aria-hidden="true"><i /><i /><i /></div>
+      <svg className={styles.drift} viewBox="0 0 1440 900" fill="none" aria-hidden="true" preserveAspectRatio="xMidYMid slice">
+        <path d="M-60 640C220 520 380 760 640 620S1040 420 1500 560" />
+        <path d="M-40 220C260 340 420 120 700 240S1120 380 1520 180" />
+        <path d="M120 900C330 700 560 880 780 720S1180 600 1460 780" />
+      </svg>
       <nav className={styles.nav} aria-label="Main navigation">
         <Link href="/welcome" className={styles.brand}><Logo size={30} /><span>Threads</span></Link>
         <div className={styles.navLinks}>
@@ -30,7 +37,7 @@ export default function WelcomePage() {
           </svg>
         </div>
         <p className={styles.eyebrow}><span /> A quieter kind of AI</p>
-        <h1 id="welcome-title">Follow your<br /><em>curiosity.</em></h1>
+        <h1 id="welcome-title"><span className={styles.line}>Follow your</span><br /><em className={styles.line}>curiosity.</em></h1>
         <p className={styles.description}>Big questions. Small tangents. Half-formed ideas.<br />There’s room for all of them here.</p>
         <LandingPrompt />
         <p className={styles.privacy}><Timer size={13} /> No account needed. Guest chats expire in one hour.</p>
