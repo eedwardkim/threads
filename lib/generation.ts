@@ -6,15 +6,18 @@ import { AppError, readableError } from "./errors";
 import { normalizeMathDelimiters } from "./math";
 import type { ModelKey } from "./models";
 import { assembleMainPrompt, assembleThreadPrompt } from "./prompts";
-import { getProviderStatus, requireProviderAvailable, streamChat } from "./provider";
+import { digestWriter, getProviderStatus, requireProviderAvailable, streamChat } from "./provider";
 import { ensureDemoChat } from "./seed";
 import type { Message, PromptMessage, StreamEvent, Thread } from "./types";
+import { resolvePromptAttachments, type DigestWriter } from "./vision";
 
 export interface GenerationRequest {
   requestId: string;
   chatId: string;
   threadId: string | null;
   content?: string;
+  /** Pending uploads (this chat) to attach to the new user message, in display order. */
+  attachmentIds?: string[];
   modelKey: ModelKey;
   retryMessageId?: string;
 }
@@ -43,6 +46,8 @@ export interface GenerationDeps {
   signal?: AbortSignal;
   tuning?: Partial<GenerationTuning>;
   now?: () => number;
+  /** Overrides the vision model that writes image digests (tests). */
+  digestWriter?: DigestWriter;
 }
 
 export interface PreparedGeneration {
@@ -68,6 +73,7 @@ export const DEFAULT_TUNING: GenerationTuning = {
 export function payloadHash(input: GenerationRequest): string {
   return createHash("sha256").update(JSON.stringify({
     chatId: input.chatId, threadId: input.threadId, content: input.content ?? null, modelKey: input.modelKey, retryMessageId: input.retryMessageId ?? null,
+    attachmentIds: input.attachmentIds?.length ? input.attachmentIds : null,
   })).digest("hex");
 }
 
@@ -127,8 +133,8 @@ export async function prepareGeneration(input: GenerationRequest, deps: Generati
       ({ message, attempt } = await repository.beginRetry(retry.id));
     } else {
       const scope = { chatId: input.chatId, threadId: input.threadId, modelKey: input.modelKey };
-      userMessage = await repository.appendMessage({ ...scope, role: "user", content: input.content!, complete: true });
-      prompt.push({ role: userMessage.role, content: userMessage.content });
+      userMessage = await repository.appendMessage({ ...scope, role: "user", content: input.content ?? "", complete: true, attachmentIds: input.attachmentIds });
+      prompt.push({ role: userMessage.role, content: userMessage.content, ...(userMessage.attachments ? { attachments: userMessage.attachments } : {}) });
       message = await repository.appendMessage({ ...scope, role: "assistant", content: "", complete: false });
       attempt = 0;
     }
@@ -142,7 +148,7 @@ export async function prepareGeneration(input: GenerationRequest, deps: Generati
   }
 }
 
-type StopReason = "client" | "stop" | "lease_lost" | "deadline" | "persistence_failed" | "stale_generation";
+type StopReason = "client" | "stop" | "lease_lost" | "deadline" | "persistence_failed" | "stale_generation" | "guest_expired";
 
 /**
  * Persists streamed text in bounded, coalesced checkpoints: at most one write in flight,
@@ -284,11 +290,20 @@ export function streamGeneration(prepared: PreparedGeneration, deps: GenerationD
       void jobs.renew(job.id, job.fence, tuning.leaseMs).then((lease) => {
         if (!lease) stop("lease_lost");
         else if (lease.cancelRequested) stop("stop");
-      }).catch(() => undefined);
+      }).catch((error: unknown) => {
+        if (error instanceof AppError && error.code === "guest_expired") stop("guest_expired");
+      });
     }, Math.min(tuning.heartbeatMs, Math.max(50, Math.floor(tuning.leaseMs / 3))));
 
     try {
       if (!emit({ type: "start", message, userMessage: prepared.userMessage })) return;
+      // Image bytes and any missing digests are fetched only now, outside every transaction.
+      await resolvePromptAttachments({
+        prompt: prepared.prompt, modelKey: prepared.modelKey, status: getProviderStatus(), signal,
+        load: (ids) => repository.loadAttachments(ids),
+        save: (id, digest, model) => repository.saveAttachmentDigest(id, digest, model),
+        writer: deps.digestWriter ?? digestWriter,
+      });
       for await (const chunk of streamChat({ messages: prepared.prompt, modelKey: prepared.modelKey, signal })) {
         if (signal.aborted) break;
         if (chunk.type === "text") {

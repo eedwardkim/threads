@@ -13,6 +13,7 @@ function isPublic(pathname: string): boolean {
  * fetch and streaming clients see a proper error instead of HTML.
  */
 export async function proxy(request: NextRequest) {
+  if (request.nextUrl.pathname === "/welcome") return NextResponse.next();
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const key = process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY ?? process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
   if (!url || !key) {
@@ -45,7 +46,7 @@ export async function proxy(request: NextRequest) {
     for (const cookie of response.cookies.getAll()) redirect.cookies.set(cookie);
     return redirect;
   }
-  if (data?.claims?.sub && pathname === "/login") {
+  if (data?.claims?.sub && data.claims.is_anonymous !== true && pathname === "/login") {
     const home = request.nextUrl.clone();
     home.pathname = "/";
     home.search = "";

@@ -2,10 +2,14 @@ import { createServerClient, type CookieOptions } from "@supabase/ssr";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { cookies } from "next/headers";
 import { AppError } from "../errors";
+import { registerGuest } from "./guest";
 
 export interface AuthUser {
   id: string;
   email: string | null;
+  isGuest?: boolean;
+  guestExpiresAt?: number;
+  guestCreatedAt?: string;
 }
 
 export interface SupabaseConfig {
@@ -54,7 +58,13 @@ export async function verifyUser(client: SupabaseClient): Promise<AuthUser | nul
   const { data, error } = await client.auth.getClaims();
   if (error || !data?.claims?.sub) return null;
   const email = typeof data.claims.email === "string" ? data.claims.email : null;
-  return { id: data.claims.sub, email };
+  if (data.claims.is_anonymous !== true) return { id: data.claims.sub, email };
+  const { data: live, error: liveError } = await client.auth.getUser();
+  if (liveError || !live.user) return null;
+  return {
+    id: live.user.id, email: live.user.email ?? null,
+    ...(live.user.is_anonymous ? { isGuest: true, guestCreatedAt: live.user.created_at } : {}),
+  };
 }
 
 type Resolver = () => Promise<AuthUser | null>;
@@ -66,7 +76,10 @@ export function setAuthResolverForTests(resolver: Resolver | undefined): void {
 
 export async function currentUser(): Promise<AuthUser | null> {
   if (authGlobal.__threadsAuthResolver) return authGlobal.__threadsAuthResolver();
-  return verifyUser(await createSupabaseServerClient());
+  const user = await verifyUser(await createSupabaseServerClient());
+  if (!user?.isGuest) return user;
+  const guestExpiresAt = user.guestCreatedAt ? await registerGuest(user.id, user.guestCreatedAt) : null;
+  return guestExpiresAt && guestExpiresAt > Date.now() ? { ...user, guestExpiresAt } : null;
 }
 
 /** For API routes: JSON 401 instead of an HTML redirect. */

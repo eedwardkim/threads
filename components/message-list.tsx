@@ -7,6 +7,7 @@ import { streamStore, type StreamSession } from "@/lib/stream-store";
 import type { Message, Thread } from "@/lib/types";
 import { Markdown } from "./markdown";
 import { CopyButton } from "./copy-button";
+import { ListenButton, SpeechPlayer, useSpeechHighlight } from "./speech-player";
 import { Button } from "./ui/button";
 import { Logo } from "./logo";
 
@@ -27,6 +28,8 @@ const MessageCard = memo(function MessageCard({ message, threads, activeThreadId
   const selectable = message.role === "assistant" && message.complete && message.threadId === null && !locked;
   const time = new Date(message.createdAt);
   const prewritten = message.modelKey === null && message.role === "assistant";
+  const body = useRef<HTMLDivElement>(null);
+  useSpeechHighlight(body, message.id);
   return (
     <article className={`message ${message.role}-message`} data-message-id={message.id} data-role={message.role} data-complete={String(message.complete)} data-scope={message.threadId ? "thread" : "main"} aria-busy={streaming}>
       <header className="message-header">
@@ -36,11 +39,21 @@ const MessageCard = memo(function MessageCard({ message, threads, activeThreadId
         <div className="message-actions">
           <time dateTime={time.toISOString()} suppressHydrationWarning>{time.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}</time>
           {message.threadId && onCopyToMain && <Button variant="ghost" size="sm" className="copy-main-button" aria-label="Copy to main chat" title="Copy to main chat" disabled={locked} onClick={() => onCopyToMain(message.id)}><CornerUpLeft />Copy to main</Button>}
+          {message.role === "assistant" && message.complete && <ListenButton message={message} />}
           <CopyButton text={message.content} />
         </div>
       </header>
-      <div className="message-body">
-        <Markdown content={message.content} anchors={anchors} activeThreadId={activeThreadId} onOpenThread={onOpenThread} streaming={streaming} selectable={selectable} />
+      <div ref={body} className="message-body">
+        {message.role === "assistant" && <SpeechPlayer messageId={message.id} />}
+        {message.attachments && message.attachments.length > 0 && <ul className="message-attachments" aria-label="Attached images">
+          {message.attachments.map((attachment) => <li key={attachment.id}>
+            <a href={`/api/attachments/${encodeURIComponent(attachment.id)}`} target="_blank" rel="noreferrer" title={`${attachment.name} (${attachment.width}×${attachment.height})`}>
+              {/* eslint-disable-next-line @next/next/no-img-element -- owner-scoped API image, not a static asset */}
+              <img src={`/api/attachments/${encodeURIComponent(attachment.id)}`} alt={attachment.name} width={attachment.width} height={attachment.height} loading="lazy" decoding="async" />
+            </a>
+          </li>)}
+        </ul>}
+        {(message.role !== "user" || message.content.trim() !== "") && <Markdown content={message.content} anchors={anchors} activeThreadId={activeThreadId} onOpenThread={onOpenThread} streaming={streaming} selectable={selectable} />}
         {streaming && <span className="sr-only" role="status">Writing an answer</span>}
         {!message.complete && !streaming && <div className="stopped-state" role="status">
           <Pause size={14} />

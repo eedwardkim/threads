@@ -221,6 +221,11 @@ test.describe("conversations", () => {
     const user = await createTestUser("demo");
     await signInViaForm(page, user);
     const cookies = cookieHeader((await page.context().cookies()).map((cookie) => ({ name: cookie.name, value: cookie.value })));
+    const ordinary = await api<{ chats: { demoKey: string | null }[] }>({ cookies, path: "/api/chats" });
+    expect(ordinary.json.chats.every((chat) => chat.demoKey === null)).toBe(true);
+    await page.goto("/dev-tools");
+    await page.getByRole("button", { name: "Restore and show demo library" }).click();
+    await page.waitForURL("/");
     const library = await api<{ chats: { id: string; demoKey: string | null; title: string }[] }>({ cookies, path: "/api/chats" });
     const demos = library.json.chats.filter((chat) => chat.demoKey);
     expect(demos.length).toBeGreaterThan(0);

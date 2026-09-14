@@ -22,7 +22,7 @@ export async function GET(request: Request) {
       return json({ chats, folders });
     }
     const chat = await repository.getChat(id);
-    if (!chat) throw new AppError("This conversation no longer exists.", 404, "not_found");
+    if (!chat || (chat.demoKey && !(await repository.demoEnabled()))) throw new AppError("This conversation is unavailable. Demo conversations can be opened through Developer tools.", 404, "not_found");
     await ensureDemoChat(repository, id);
     const [messages, threads] = await Promise.all([repository.listMessages(id, null), repository.listThreads(id)]);
     return json({ chat, messages, threads });

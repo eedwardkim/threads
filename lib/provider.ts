@@ -7,6 +7,8 @@ import { createOpenAIProvider } from "./providers/openai";
 import type { CompressionInput, StreamInput } from "./providers/types";
 import type { ChatProvider } from "./providers/types";
 import type { ProviderStatus } from "./types";
+import type { AttachmentFile } from "./db/repository";
+import { DIGEST_SYSTEM_PROMPT, digestModelKey, mockDigest, type DigestWriter } from "./vision";
 
 const ENV_VAR: Record<ProviderId, string> = {
   deepseek: "DEEPSEEK_API_KEY",
@@ -106,6 +108,41 @@ export function streamChat(input: StreamInput) {
 export function compress(input: CompressionInput) {
   return getCompressProvider().compress(input);
 }
+
+const DIGEST_TIMEOUT_MS = 90_000;
+
+/** Writes the one-time visual record of an image with the configured vision model. */
+export const digestWriter: DigestWriter = {
+  async describe(file: AttachmentFile, signal?: AbortSignal) {
+    const status = getProviderStatus();
+    const modelKey = digestModelKey(status);
+    if (!modelKey) {
+      throw new AppError("No vision-capable provider is configured to read images. Set OPENAI_API_KEY, ANTHROPIC_API_KEY, or DEEPSEEK_API_KEY.", 503, "missing_key");
+    }
+    if (status.mock) return { digest: mockDigest(file), model: "mock" };
+    const timeout = AbortSignal.timeout(DIGEST_TIMEOUT_MS);
+    const combined = signal ? AbortSignal.any([signal, timeout]) : timeout;
+    let digest = "";
+    try {
+      for await (const chunk of getProvider(modelKey).streamChat({
+        modelKey,
+        signal: combined,
+        messages: [
+          { role: "system", content: DIGEST_SYSTEM_PROMPT },
+          { role: "user", content: `Describe this image (${file.name}, ${file.width}×${file.height}).`, attachments: [file], images: [{ data: file.data, mediaType: file.mediaType }] },
+        ],
+      })) {
+        if (chunk.type === "text") digest += chunk.text;
+      }
+    } catch (error) {
+      if (timeout.aborted && !signal?.aborted) throw new AppError("Reading the image took too long. Please retry.", 504, "vision_timeout");
+      if (error instanceof AppError) throw new AppError(`The image could not be read: ${error.message}`, error.status, "vision_failed");
+      throw error;
+    }
+    if (!digest.trim()) throw new AppError("The image could not be read. Please retry.", 502, "vision_failed");
+    return { digest: digest.trim(), model: modelFor(modelKey).id };
+  },
+};
 
 export function requireProviderAvailable(modelKey: ModelKey, status: ProviderStatus = getProviderStatus()): void {
   if (status.mock) return;

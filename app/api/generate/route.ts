@@ -2,6 +2,7 @@ import { z } from "zod";
 import { apiError, assertLocalRequest, readBody, withApiUser } from "../../../lib/api";
 import { AppError } from "../../../lib/errors";
 import { DuplicateRequest, prepareGeneration, STREAM_HEADERS, streamGeneration } from "../../../lib/generation";
+import { MAX_ATTACHMENTS_PER_MESSAGE } from "../../../lib/attachments/image";
 import { isModelKey, type ModelKey } from "../../../lib/models";
 
 export const runtime = "nodejs";
@@ -14,9 +15,11 @@ const schema = z.object({
   chatId: id,
   threadId: id.nullable(),
   content: z.string().max(100_000).optional(),
+  attachmentIds: z.array(id).max(MAX_ATTACHMENTS_PER_MESSAGE).optional(),
   modelKey: z.custom<ModelKey>(isModelKey),
   retryMessageId: id.optional(),
-}).refine((input) => Boolean(input.retryMessageId || input.content?.trim()), { path: ["content"], message: "Enter a message." });
+}).refine((input) => Boolean(input.retryMessageId || input.content?.trim() || input.attachmentIds?.length), { path: ["content"], message: "Enter a message or attach an image." })
+  .refine((input) => !(input.retryMessageId && input.attachmentIds?.length), { path: ["attachmentIds"], message: "Retries cannot add attachments." });
 
 export async function POST(request: Request): Promise<Response> {
   try {
