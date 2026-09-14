@@ -12,12 +12,12 @@ import { DEMO_FOLDERS } from "../lib/demo-catalog";
 import type { Chat, Folder } from "../lib/types";
 
 const folders: Folder[] = [
-  { id: "work", name: "Work", parentId: null, createdAt: 1, sortOrder: 0 },
-  { id: "reading", name: "Reading", parentId: "work", createdAt: 2, sortOrder: 0 },
+  { id: "work", name: "Work", parentId: null, createdAt: 1, sortOrder: 0, demoKey: null },
+  { id: "reading", name: "Reading", parentId: "work", createdAt: 2, sortOrder: 0, demoKey: null },
 ];
 const chats: Chat[] = [
-  { id: "notes", title: "Project notes", folderId: null, createdAt: 1 },
-  { id: "research", title: "Research questions", folderId: "reading", createdAt: 2 },
+  { id: "notes", title: "Project notes", folderId: null, createdAt: 1, demoKey: null },
+  { id: "research", title: "Research questions", folderId: "reading", createdAt: 2, demoKey: null },
 ];
 let host: HTMLDivElement;
 let root: Root;
@@ -310,17 +310,18 @@ describe("sidebar organization", () => {
       chats, folders, currentChatId: "notes", threads: [], mobileOpen: false, theme: "dark", locked: false, searchOpen: false,
       onChat: vi.fn(), onNewChat: vi.fn(), onDeleteChat: vi.fn(), onMoveChat: vi.fn(), onRenameChat: vi.fn(),
       onDropChat: vi.fn(), onRenameFolder: vi.fn(), onDeleteFolder: vi.fn(), onMoveFolder: vi.fn(), onCreateFolder: vi.fn(),
-      onRenameThread: vi.fn(), onDeleteThread: vi.fn(), onCloseMobile: vi.fn(), onToggleTheme: vi.fn(), onSearch: vi.fn(), onSwitcher: vi.fn(), ...overrides,
+      onRenameThread: vi.fn(), onDeleteThread: vi.fn(), onCloseMobile: vi.fn(), onToggleTheme: vi.fn(), onSearch: vi.fn(), onSwitcher: vi.fn(), userEmail: "person@example.com" as string | null, onSignOut: vi.fn(), ...overrides,
     };
     await act(async () => root.render(<Sidebar {...props} />));
     return props;
   }
 
-  it("starts demo folders collapsed without collapsing personal folders", async () => {
+  it("starts demo folders collapsed (by persisted demo metadata, not by id) without collapsing personal folders", async () => {
     const demo = DEMO_FOLDERS[0];
+    const folderId = crypto.randomUUID();
     await renderSidebar({
-      folders: [...folders, { id: demo.id, name: demo.name, parentId: null, createdAt: 1, sortOrder: 0 }],
-      chats: [...chats, { ...demo.chats[0], folderId: demo.id }],
+      folders: [...folders, { id: folderId, name: demo.name, parentId: null, createdAt: 1, sortOrder: 0, demoKey: demo.id }],
+      chats: [...chats, { id: crypto.randomUUID(), title: demo.chats[0].title, createdAt: demo.chats[0].createdAt, folderId, demoKey: demo.chats[0].id }],
     });
     expect(element('[aria-label="Collapse folder: Work"]').getAttribute("aria-expanded")).toBe("true");
     expect(element('[aria-label="Expand folder: Linear Algebra"]').getAttribute("aria-expanded")).toBe("false");

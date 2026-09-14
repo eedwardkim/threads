@@ -165,8 +165,8 @@ describe("DeepSeek HTTP adapter", () => {
     expect(transport.mock.calls[0][1]?.signal?.aborted).toBe(true);
   });
 
-  it("does not contact the live API when mock mode is unset", async () => {
-    vi.stubEnv("USE_MOCK", undefined);
+  it("does not contact the live API in explicit mock mode", async () => {
+    vi.stubEnv("USE_MOCK", "true");
     vi.stubEnv("DEEPSEEK_API_KEY", undefined);
     const controller = new AbortController();
     controller.abort();

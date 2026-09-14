@@ -7,3 +7,7 @@ out/
 *.tsbuildinfo
 .DS_Store
 coverage/
+perf-results/
+.scratch/
+test-results/
+playwright-report/

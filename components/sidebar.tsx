@@ -2,9 +2,8 @@
 
 import { useState, useRef, useEffect, useId, type CSSProperties, type DragEvent, type KeyboardEvent } from "react";
 import { createPortal } from "react-dom";
-import { Check, ChevronRight, Ellipsis, FolderIcon, FolderInput, FolderOpen, FolderPlus, Library, MessageSquare, Moon, Pencil, Plus, Search, Sun, TextQuote, Trash2, X } from "lucide-react";
+import { Check, ChevronRight, Ellipsis, FolderIcon, FolderInput, FolderOpen, FolderPlus, Library, LogOut, MessageSquare, Moon, Pencil, Plus, Search, Sun, TextQuote, Trash2, X } from "lucide-react";
 import type { Chat, Folder, Thread } from "@/lib/types";
-import { DEMO_FOLDERS } from "@/lib/demo-catalog";
 import { CHAT_DRAG_MIME, isChatDrag, setChatDragImage } from "@/lib/drag-ghost";
 import { Button } from "./ui/button";
 import { Logo } from "./logo";
@@ -97,7 +96,7 @@ type FolderActions = {
 };
 
 function FolderNode({ folder, folders, chats, ...actions }: { folder: Folder; folders: Folder[]; chats: Chat[] } & ChatActions & FolderActions) {
-  const [expanded, setExpanded] = useState(() => !DEMO_FOLDERS.some((item) => item.id === folder.id));
+  const [expanded, setExpanded] = useState(() => folder.demoKey === null);
   const [dropHover, setDropHover] = useState(false);
   const expandTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const children = folders.filter((child) => child.parentId === folder.id);
@@ -222,7 +221,7 @@ function ThreadRow({ thread, activeThreadId, onOpenThread, onRenameThread, onDel
   </div>;
 }
 
-export function Sidebar({ chats, folders, currentChatId, threads, activeThreadId, onChat, onNewChat, onOpenThread, onDeleteChat, onMoveChat, onRenameChat, onRenameThread, onDeleteThread, onRenameFolder, onDeleteFolder, onMoveFolder, onCreateFolder, onDropChat, mobileOpen, onCloseMobile, theme, onToggleTheme, locked, searchOpen, onSearch, onSwitcher, children }: ChatActions & FolderActions & {
+export function Sidebar({ chats, folders, currentChatId, threads, activeThreadId, onChat, onNewChat, onOpenThread, onDeleteChat, onMoveChat, onRenameChat, onRenameThread, onDeleteThread, onRenameFolder, onDeleteFolder, onMoveFolder, onCreateFolder, onDropChat, mobileOpen, onCloseMobile, theme, onToggleTheme, locked, searchOpen, onSearch, onSwitcher, userEmail, onSignOut, children }: ChatActions & FolderActions & {
   chats: Chat[];
   folders: Folder[];
   threads: Thread[];
@@ -238,6 +237,8 @@ export function Sidebar({ chats, folders, currentChatId, threads, activeThreadId
   searchOpen: boolean;
   onSearch: () => void;
   onSwitcher: () => void;
+  userEmail: string | null;
+  onSignOut: () => void;
   children?: React.ReactNode;
 }) {
   const rootFolders = folders.filter((folder) => folder.parentId === null);
@@ -274,7 +275,11 @@ export function Sidebar({ chats, folders, currentChatId, threads, activeThreadId
           {threads.length ? <div className="thread-nav-list">{threads.map((thread) => <ThreadRow key={thread.id} thread={thread} activeThreadId={activeThreadId} onOpenThread={onOpenThread} onRenameThread={onRenameThread} onDeleteThread={onDeleteThread} />)}</div> : <div className="empty-threads"><span className="empty-thread-mark"><TextQuote size={22} /></span><p>A thought worth following?</p><span>Select a passage in an answer.<br />Keep the conversation beside it.</span></div>}
         </section>
       </div>
-      <footer className="sidebar-footer"><Button variant="ghost" size="icon" aria-label={`Switch to ${theme === "dark" ? "light" : "dark"} mode`} title={`Switch to ${theme === "dark" ? "light" : "dark"} mode`} onClick={onToggleTheme}>{theme === "dark" ? <Sun /> : <Moon />}</Button></footer>
+      <footer className="sidebar-footer">
+        <Button variant="ghost" size="icon" aria-label={`Switch to ${theme === "dark" ? "light" : "dark"} mode`} title={`Switch to ${theme === "dark" ? "light" : "dark"} mode`} onClick={onToggleTheme}>{theme === "dark" ? <Sun /> : <Moon />}</Button>
+        <span className="sidebar-user" title={userEmail ?? undefined}>{userEmail ?? "Signed in"}</span>
+        <Button variant="ghost" size="icon" aria-label="Sign out" title="Sign out" onClick={onSignOut}><LogOut /></Button>
+      </footer>
     </aside>
   </>;
 }

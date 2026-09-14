@@ -1,5 +1,23 @@
 import { ZodError, type ZodType } from "zod";
+import { requireUser, type AuthUser } from "./auth/server";
+import { dataFor, type UserData } from "./db/access";
 import { AppError } from "./errors";
+
+export interface ApiContext extends UserData {
+  user: AuthUser;
+}
+
+/** Verifies the caller server-side and returns owner-scoped data access. Throws a JSON-able 401. */
+export async function withApiUser(): Promise<ApiContext> {
+  const user = await requireUser();
+  return { user, ...dataFor(user.id) };
+}
+
+const PRIVATE_HEADERS = { "Cache-Control": "private, no-store" };
+
+export function json(body: unknown, init: ResponseInit = {}): Response {
+  return Response.json(body, { ...init, headers: { ...PRIVATE_HEADERS, ...init.headers } });
+}
 
 function isLoopbackPreview(origin: string, expected: string, site: string | null): boolean {
   if (site !== "same-origin" || !URL.canParse(origin) || !URL.canParse(expected)) return false;
@@ -33,10 +51,11 @@ export async function readBody<T>(request: Request, schema: ZodType<T>): Promise
 }
 
 export function apiError(error: unknown): Response {
-  if (error instanceof ZodError) return Response.json({ error: "Check the request and try again.", code: "invalid_request" }, { status: 400 });
-  if (error instanceof AppError) return Response.json({ error: error.message, code: error.code }, { status: error.status });
-  console.error("[api] Unexpected request failure", error instanceof Error ? error.name : "Unknown error");
-  return Response.json({ error: "Something went wrong. Your saved conversations are safe. Please try again.", code: "server_error" }, { status: 500 });
+  if (error instanceof ZodError) return json({ error: "Check the request and try again.", code: "invalid_request" }, { status: 400 });
+  if (error instanceof AppError) return json({ error: error.message, code: error.code }, { status: error.status });
+  if (error instanceof Error && error.name === "AbortError") return json({ error: "The request was stopped.", code: "cancelled" }, { status: 499 });
+  console.error("[api] Unexpected request failure", error instanceof Error ? `${error.name}: ${error.message}` : "Unknown error");
+  return json({ error: "Something went wrong. Your saved conversations are safe. Please try again.", code: "server_error" }, { status: 500 });
 }
 
 export function requiredId(value: string | null): string {

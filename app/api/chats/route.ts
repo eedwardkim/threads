@@ -1,8 +1,6 @@
 import { z } from "zod";
-import { getRepository } from "@/lib/db/repository";
-import { apiError, assertLocalRequest, readBody, requiredId } from "@/lib/api";
+import { apiError, assertLocalRequest, json, readBody, requiredId, withApiUser } from "@/lib/api";
 import { AppError } from "@/lib/errors";
-import { assertIdle } from "@/lib/generation-lock";
 import { ensureDemoChat } from "@/lib/seed";
 
 export const runtime = "nodejs";
@@ -17,13 +15,17 @@ const patchSchema = z.union([
 
 export async function GET(request: Request) {
   try {
-    const repository = getRepository();
+    const { repository } = await withApiUser();
     const id = new URL(request.url).searchParams.get("id");
-    if (!id) return Response.json({ chats: repository.listChats(), folders: repository.listFolders() });
-    const chat = repository.getChat(id);
+    if (!id) {
+      const { chats, folders } = await repository.library(null);
+      return json({ chats, folders });
+    }
+    const chat = await repository.getChat(id);
     if (!chat) throw new AppError("This conversation no longer exists.", 404, "not_found");
     await ensureDemoChat(repository, id);
-    return Response.json({ chat, messages: repository.listMessages(id), threads: repository.listThreads(id) });
+    const [messages, threads] = await Promise.all([repository.listMessages(id, null), repository.listThreads(id)]);
+    return json({ chat, messages, threads });
   } catch (error) {
     return apiError(error);
   }
@@ -33,7 +35,8 @@ export async function POST(request: Request) {
   try {
     assertLocalRequest(request);
     const body = request.body ? await readBody(request, createSchema) : {};
-    return Response.json({ chat: getRepository().createChat(body.folderId ?? null) }, { status: 201 });
+    const { repository } = await withApiUser();
+    return json({ chat: await repository.createChat(body.folderId ?? null) }, { status: 201 });
   } catch (error) {
     return apiError(error);
   }
@@ -43,9 +46,9 @@ export async function PATCH(request: Request) {
   try {
     const body = await readBody(request, patchSchema);
     const id = requiredId(new URL(request.url).searchParams.get("id"));
-    const repo = getRepository();
-    const chat = "title" in body ? repo.renameChat(id, body.title) : repo.moveChat(id, body.folderId);
-    return Response.json({ chat });
+    const { repository } = await withApiUser();
+    const chat = "title" in body ? await repository.renameChat(id, body.title) : await repository.moveChat(id, body.folderId);
+    return json({ chat });
   } catch (error) {
     return apiError(error);
   }
@@ -54,9 +57,12 @@ export async function PATCH(request: Request) {
 export async function DELETE(request: Request) {
   try {
     assertLocalRequest(request);
-    assertIdle();
-    getRepository().deleteChat(requiredId(new URL(request.url).searchParams.get("id")));
-    return Response.json({ ok: true });
+    const id = requiredId(new URL(request.url).searchParams.get("id"));
+    const { repository, jobs } = await withApiUser();
+    // Stop any running work in this chat first; its rows disappear with the chat and fenced writers stop.
+    await jobs.requestStopScope(id);
+    await repository.deleteChat(id);
+    return json({ ok: true });
   } catch (error) {
     return apiError(error);
   }

@@ -201,7 +201,7 @@ body { overflow: hidden; }
 .message-list-region { position: relative; flex: 1; min-height: 0; }
 .message-scroll { height: 100%; overflow-y: auto; overscroll-behavior: contain; scroll-padding: 16px 0; overflow-anchor: none; }
 .message-list-content { position: relative; width: var(--reading-width); margin: 0 auto; padding: 20px 0 36px; }
-.message { padding: 0 0 10px; border-radius: 5px; }
+.message { padding: 0 0 10px; border-radius: 5px; content-visibility: auto; contain-intrinsic-size: auto 320px; }
 .message + .message { margin-top: 20px; }
 .assistant-message + .user-message { padding-top: 18px; border-top: 1px solid color-mix(in srgb, var(--border) 40%, transparent); }
 .message-header { display: flex; align-items: center; gap: 7px; height: 24px; margin-bottom: 8px; }

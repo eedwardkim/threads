@@ -6,6 +6,8 @@ export interface Folder {
   parentId: string | null;
   createdAt: number;
   sortOrder: number;
+  /** Stable catalog key when this folder is a prewritten demo instance. */
+  demoKey: string | null;
 }
 
 export interface Chat {
@@ -13,6 +15,8 @@ export interface Chat {
   title: string;
   folderId: string | null;
   createdAt: number;
+  /** Stable catalog key when this chat is a prewritten demo instance. */
+  demoKey: string | null;
 }
 
 export interface Message {
