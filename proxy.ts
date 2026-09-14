@@ -13,6 +13,7 @@ function isPublic(pathname: string): boolean {
  * fetch and streaming clients see a proper error instead of HTML.
  */
 export async function proxy(request: NextRequest) {
+  if (request.nextUrl.pathname === "/welcome") return NextResponse.next();
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const key = process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY ?? process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
   if (!url || !key) {

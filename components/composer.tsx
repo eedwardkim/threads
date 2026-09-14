@@ -1,8 +1,9 @@
 "use client";
 
-import { useLayoutEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { ArrowUp, Brain, Square } from "lucide-react";
 import { currentClientUser, registerPrivateState } from "@/lib/client-state";
+import { takeEntryPrompt } from "@/lib/entry-prompt";
 import { MODELS, PROVIDER_LABEL, DEFAULT_MODEL, isModelKey, selectableModels, type ProviderId } from "@/lib/models";
 import { useModelPreference } from "@/lib/preferences";
 import { scopeKey, streamStore, useStreams } from "@/lib/stream-store";
@@ -30,8 +31,24 @@ export function Composer({ chatId, threadId, messages, disabled = false, focusOn
   const session = streams.sessions.get(scopeKey(chatId, threadId));
   const ownActive = session !== undefined && session.phase !== "idle";
   const blocked = disabled || streams.locked || ownActive;
-  const lastModel = messages.findLast((message) => message.modelKey)?.modelKey ?? DEFAULT_MODEL;
+  const lastModel = messages.findLast((message) => message.modelKey)?.modelKey
+    ?? selectableModels().find((entry) => entry.key === DEFAULT_MODEL && (providerStatus.mock || providerStatus[entry.provider]))?.key
+    ?? selectableModels().find((entry) => providerStatus.mock || providerStatus[entry.provider])?.key
+    ?? DEFAULT_MODEL;
   const [model, setModel] = useModelPreference(scope, lastModel);
+
+  useEffect(() => {
+    if (threadId) return;
+    const userId = currentClientUser();
+    const entry = takeEntryPrompt(userId, chatId);
+    if (!entry) return;
+    void streamStore.send({ chatId, threadId: null, content: entry, modelKey: model }).then((accepted) => {
+      if (!accepted && currentClientUser() === userId && !drafts.get(scope)) {
+        drafts.set(scope, entry);
+        setDraft(entry);
+      }
+    });
+  }, [chatId, threadId, scope, model]);
 
   useLayoutEffect(() => {
     const element = textarea.current;
