@@ -24,6 +24,7 @@ const bytea = customType<{ data: Uint8Array; driverData: Uint8Array }>({
 export const userState = threadsSchema.table("user_state", {
   ownerId: uuid("owner_id").primaryKey(),
   demoSeedKey: text("demo_seed_key"),
+  demoEnabled: boolean("demo_enabled").notNull().default(false),
   createdAt: ms("created_at").notNull(),
 });
 

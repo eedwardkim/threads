@@ -11,7 +11,8 @@ export async function GET(request: Request) {
     const chatId = requiredId(params.get("chatId"));
     const query = (params.get("q") ?? "").slice(0, 300);
     const { repository } = await withApiUser();
-    if (!(await repository.getChat(chatId))) throw new AppError("This conversation no longer exists.", 404, "not_found");
+    const chat = await repository.getChat(chatId);
+    if (!chat || (chat.demoKey && !(await repository.demoEnabled()))) throw new AppError("This conversation no longer exists.", 404, "not_found");
     if (query.trim()) await ensureDemoChat(repository, chatId);
     return json({ results: await repository.searchMessages(chatId, query) });
   } catch (error) { return apiError(error); }
