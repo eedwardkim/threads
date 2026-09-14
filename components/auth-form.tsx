@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { supabaseBrowser } from "@/lib/auth/client";
 import { clearPrivateClientState } from "@/lib/client-state";
 import { requestJson } from "@/lib/client-api";
+import Link from "next/link";
 
 type Mode = "signin" | "signup" | "recover";
 
@@ -123,6 +124,7 @@ export function AuthForm({ next, initialError, initialMode, googleEnabled }: { n
           <p className="auth-notice">No account needed. Guest chats expire after 1 hour and are deleted within about a minute of expiry. Use End guest session to delete them immediately.</p>
         </> : null}
         <div className="auth-links">
+          <Link href="/welcome">Explore Threads</Link>
           {mode !== "signin" ? <button type="button" onClick={() => setMode("signin")}>Have an account? Sign in</button> : null}
           {mode !== "signup" ? <button type="button" onClick={() => setMode("signup")}>New here? Create an account</button> : null}
           {mode !== "recover" ? <button type="button" onClick={() => setMode("recover")}>Forgot your password?</button> : null}
