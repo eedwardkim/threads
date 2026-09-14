@@ -10,7 +10,7 @@ export interface ApiContext extends UserData {
 /** Verifies the caller server-side and returns owner-scoped data access. Throws a JSON-able 401. */
 export async function withApiUser(): Promise<ApiContext> {
   const user = await requireUser();
-  return { user, ...dataFor(user.id) };
+  return { user, ...dataFor(user.id, undefined, user.isGuest) };
 }
 
 const PRIVATE_HEADERS = { "Cache-Control": "private, no-store" };

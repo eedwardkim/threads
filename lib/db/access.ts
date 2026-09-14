@@ -7,6 +7,6 @@ export interface UserData {
   jobs: GenerationStore;
 }
 
-export function dataFor(userId: string, handle: DatabaseHandle = getDatabase()): UserData {
-  return { repository: new ChatRepository(handle, userId), jobs: new GenerationStore(handle, userId) };
+export function dataFor(userId: string, handle: DatabaseHandle = getDatabase(), guest = false): UserData {
+  return { repository: new ChatRepository(handle, userId, guest), jobs: new GenerationStore(handle, userId, guest) };
 }

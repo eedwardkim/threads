@@ -45,7 +45,7 @@ export async function proxy(request: NextRequest) {
     for (const cookie of response.cookies.getAll()) redirect.cookies.set(cookie);
     return redirect;
   }
-  if (data?.claims?.sub && pathname === "/login") {
+  if (data?.claims?.sub && data.claims.is_anonymous !== true && pathname === "/login") {
     const home = request.nextUrl.clone();
     home.pathname = "/";
     home.search = "";

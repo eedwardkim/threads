@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Menu, Pencil, Plus } from "lucide-react";
 import { ProviderBanner } from "./provider-banner";
+import { GuestSession } from "./guest-session";
 import { Toaster, toast } from "sonner";
 import { chatCache } from "@/lib/chat-cache";
 import { requestJson, errorText } from "@/lib/client-api";
@@ -45,6 +46,8 @@ function EditableTitle({ title, disabled, onRename }: { title: string; disabled:
 export interface ClientUser {
   id: string;
   email: string | null;
+  isGuest?: boolean;
+  guestExpiresAt?: number;
 }
 
 export function ChatApp({ initialData, providerStatus, initialThread = null, user, missingChat = false }: { initialData: AppData; providerStatus: ProviderStatus; initialThread?: ThreadData | null; user: ClientUser; missingChat?: boolean }) {
@@ -435,8 +438,14 @@ export function ChatApp({ initialData, providerStatus, initialThread = null, use
   async function signOut() {
     streamStore.stopAll();
     try {
-      await fetch("/auth/signout", { method: "POST", headers: { Accept: "application/json" } });
-    } catch {}
+      const response = await fetch("/auth/signout", { method: "POST", headers: { Accept: "application/json" } });
+      if (!response.ok) throw new Error("Sign-out failed");
+    } catch {
+      if (user.isGuest) {
+        toast.error("Could not end your guest session. Please try again; automatic deletion is still scheduled.");
+        return;
+      }
+    }
     clearPrivateClientState();
     window.location.replace("/login");
   }
@@ -467,6 +476,7 @@ export function ChatApp({ initialData, providerStatus, initialThread = null, use
       </Sidebar>
       {!narrow && <div className="resize-handle" onMouseDown={(e) => { e.preventDefault(); startResize('sidebar', e.clientX); }} onDoubleClick={() => { shellRef.current?.style.setProperty('--sidebar-width', '220px'); sidebarWidthRef.current = 220; try { localStorage.removeItem('threads:sidebar-width'); } catch {} }} />}
       <main className="main-pane" inert={Boolean(narrow && threadOpen)}>
+        {user.guestExpiresAt && <GuestSession expiresAt={user.guestExpiresAt} onEnd={signOut} />}
         <header className="main-header"><div className="main-title"><Button variant="ghost" size="icon" className="mobile-only" aria-label="Open navigation" onClick={() => setMobileOpen(true)}><Menu /></Button><EditableTitle title={current?.chat.title ?? "A fresh page"} disabled={!current} onRename={() => { if (current) setNaming({ kind: "chat", chat: current.chat }); }} /></div>{current?.chat.demoKey && <span className="demo-chat-badge" title="Prewritten study history. Your own follow-ups are saved normally.">Study demo</span>}</header>
         <ProviderBanner status={providerStatus} errorCode={streams.notice?.code} />
         {loadingCurrent ? <div className="conversation-skeleton" aria-busy="true" aria-label="Loading conversation"><div className="skeleton-line w-2/3" /><div className="skeleton-line" /><div className="skeleton-line w-5/6" /><div className="skeleton-line w-1/2" /></div>

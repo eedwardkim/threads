@@ -112,10 +112,10 @@ export function isUniqueViolation(error: unknown): boolean {
  * runtime role for `userId`; the owner filter is also applied explicitly in each query.
  */
 export class ChatRepository {
-  constructor(private readonly handle: DatabaseHandle, readonly userId: string) {}
+  constructor(private readonly handle: DatabaseHandle, readonly userId: string, private readonly guest = false) {}
 
   run<T>(fn: (tx: Tx) => Promise<T>): Promise<T> {
-    return withUser(this.handle, this.userId, fn);
+    return withUser(this.handle, this.userId, fn, this.guest);
   }
 
   private owned(table: { ownerId: PgColumn }) {

@@ -35,6 +35,20 @@ The importer opens the source read-only (WAL-consistent), preserves ids, text, t
 
 ## Controls
 
+### Temporary guests
+
+Enable **Anonymous sign-ins** in Supabase Auth before using **Continue as guest**. Locally, set `auth.enable_anonymous_sign_ins = true` in the Supabase configuration and restart Supabase. Apply migrations `0005` and `0006` before deploying the guest UI.
+
+Guest access expires one hour after the verified anonymous Auth account was created. Refreshing or signing in again does not extend it. Every guest database transaction checks the server-side expiry. **End guest session** deletes application data immediately and clears browser state; the anonymous Auth account and sessions are removed by the next cleanup run.
+
+`pg_cron` runs `threads-expire-guests` every minute, including when the browser is closed. It deletes up to 500 expired anonymous accounts per run using the migration owner's scheduled database connection; an Auth deletion trigger removes their application rows under `threads_guest_manager` (non-login, non-bypass-RLS). Neither application role gets access to `auth.users`. A conversion trigger protects accounts linked to a permanent identity, including races with enrollment or cleanup. Monitor `cron.job_run_details` for failed runs or a cleanup backlog; physical deletion normally follows expiry within a minute, while access ends immediately. This retention covers Astra's database; it does not change an inference provider's retention policy.
+
+```sql
+select status, return_message, start_time from cron.job_run_details
+where jobid in (select jobid from cron.job where jobname = 'threads-expire-guests')
+order by start_time desc limit 10;
+```
+
 - Select text in a completed main-chat answer, then choose **Reply** or press **R**.
 - **Cmd/Ctrl+Enter** sends. **Stop** keeps the partial answer; **Retry** retries an incomplete answer.
 - **Cmd/Ctrl+K** switches chats. **Cmd/Ctrl+F** searches the current chat and its threads.

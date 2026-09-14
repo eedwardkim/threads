@@ -57,10 +57,10 @@ function dayOf(now: number): string {
  * the `fence` column protects the message row from stale workers.
  */
 export class GenerationStore {
-  constructor(private readonly handle: DatabaseHandle, readonly userId: string) {}
+  constructor(private readonly handle: DatabaseHandle, readonly userId: string, private readonly guest = false) {}
 
   private run<T>(fn: (tx: Tx) => Promise<T>): Promise<T> {
-    return withUser(this.handle, this.userId, fn);
+    return withUser(this.handle, this.userId, fn, this.guest);
   }
 
   private owned() {

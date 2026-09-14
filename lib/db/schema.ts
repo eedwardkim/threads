@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { bigint, boolean, date, integer, pgSchema, text, uuid } from "drizzle-orm/pg-core";
+import { bigint, boolean, date, integer, pgSchema, text, timestamp, uuid } from "drizzle-orm/pg-core";
 import type { ModelKey } from "../models";
 
 // Column constraints, composite owner foreign keys, triggers, and RLS policies are defined in
@@ -7,6 +7,12 @@ import type { ModelKey } from "../models";
 export const threadsSchema = pgSchema("threads");
 
 const ms = (name: string) => bigint(name, { mode: "number" });
+
+export const guestSessions = threadsSchema.table("guest_sessions", {
+  ownerId: uuid("owner_id").primaryKey(),
+  expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+  permanent: boolean("permanent").notNull().default(false),
+});
 
 export const userState = threadsSchema.table("user_state", {
   ownerId: uuid("owner_id").primaryKey(),

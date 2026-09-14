@@ -142,7 +142,7 @@ export async function prepareGeneration(input: GenerationRequest, deps: Generati
   }
 }
 
-type StopReason = "client" | "stop" | "lease_lost" | "deadline" | "persistence_failed" | "stale_generation";
+type StopReason = "client" | "stop" | "lease_lost" | "deadline" | "persistence_failed" | "stale_generation" | "guest_expired";
 
 /**
  * Persists streamed text in bounded, coalesced checkpoints: at most one write in flight,
@@ -284,7 +284,9 @@ export function streamGeneration(prepared: PreparedGeneration, deps: GenerationD
       void jobs.renew(job.id, job.fence, tuning.leaseMs).then((lease) => {
         if (!lease) stop("lease_lost");
         else if (lease.cancelRequested) stop("stop");
-      }).catch(() => undefined);
+      }).catch((error: unknown) => {
+        if (error instanceof AppError && error.code === "guest_expired") stop("guest_expired");
+      });
     }, Math.min(tuning.heartbeatMs, Math.max(50, Math.floor(tuning.leaseMs / 3))));
 
     try {

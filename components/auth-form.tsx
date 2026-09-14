@@ -6,6 +6,7 @@ import { Logo } from "@/components/logo";
 import { Button } from "@/components/ui/button";
 import { supabaseBrowser } from "@/lib/auth/client";
 import { clearPrivateClientState } from "@/lib/client-state";
+import { requestJson } from "@/lib/client-api";
 
 type Mode = "signin" | "signup" | "recover";
 
@@ -74,6 +75,28 @@ export function AuthForm({ next, initialError, initialMode, googleEnabled }: { n
     }
   }
 
+  async function guest() {
+    if (busy) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const supabase = supabaseBrowser();
+      const { data: current } = await supabase.auth.getUser();
+      if (current.user && !current.user.is_anonymous) throw new Error("You are already signed in.");
+      if (!current.user) {
+        const { error: signInError } = await supabase.auth.signInAnonymously();
+        if (signInError) throw new Error("Guest access is unavailable. Please sign in or try again later.");
+      }
+      await requestJson("/auth/guest", { method: "POST" });
+      clearPrivateClientState();
+      router.replace(next);
+      router.refresh();
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Guest access is unavailable.");
+      setBusy(false);
+    }
+  }
+
   return (
     <main className="auth-shell">
       <form className="auth-card" onSubmit={submit} aria-busy={busy}>
@@ -95,6 +118,10 @@ export function AuthForm({ next, initialError, initialMode, googleEnabled }: { n
           {mode === "signin" ? "Sign in" : mode === "signup" ? "Create account" : "Send recovery link"}
         </Button>
         {googleEnabled && mode !== "recover" ? <Button type="button" variant="outline" disabled={busy} onClick={google} className="auth-submit">Continue with Google</Button> : null}
+        {mode !== "recover" ? <>
+          <Button type="button" variant="outline" disabled={busy} onClick={() => void guest()} className="auth-submit">Continue as guest</Button>
+          <p className="auth-notice">No account needed. Guest chats expire after 1 hour and are deleted within about a minute of expiry. Use End guest session to delete them immediately.</p>
+        </> : null}
         <div className="auth-links">
           {mode !== "signin" ? <button type="button" onClick={() => setMode("signin")}>Have an account? Sign in</button> : null}
           {mode !== "signup" ? <button type="button" onClick={() => setMode("signup")}>New here? Create an account</button> : null}
