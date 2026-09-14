@@ -274,6 +274,15 @@ test.describe("isolation and concurrency", () => {
     expect(stillThere.json.chat.title).not.toBe("hijacked");
   });
 
+  test("opening another user's chat URL shows a not-found notice and drops the foreign id", async ({ page }) => {
+    const a = cookieHeader(await sessionCookies(alice));
+    const created = await api<{ chat: { id: string } }>({ cookies: a, method: "POST", path: "/api/chats", body: {} });
+    const chatId = created.json.chat.id;
+    await signInViaForm(page, bob, `/?chat=${chatId}`);
+    await expect(page.getByText("That conversation no longer exists.")).toBeVisible();
+    await expect.poll(() => new URL(page.url()).searchParams.get("chat")).not.toBe(chatId);
+  });
+
   test("a duplicate request id is idempotent, a changed payload is rejected, and unrelated scopes stream concurrently", async () => {
     const a = cookieHeader(await sessionCookies(alice));
     const b = cookieHeader(await sessionCookies(bob));

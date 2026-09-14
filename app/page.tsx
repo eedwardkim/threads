@@ -23,5 +23,6 @@ export default async function Page({ searchParams }: { searchParams: Promise<{ c
   const initialThread = params.thread && library.current?.threads.some((thread) => thread.id === params.thread)
     ? await getThreadData(params.thread, repository)
     : null;
-  return <ChatApp initialData={library} initialThread={initialThread} user={{ id: user.id, email: user.email }} providerStatus={getProviderStatus()} />;
+  const missingChat = Boolean(params.chat) && library.current?.chat.id !== params.chat;
+  return <ChatApp initialData={library} initialThread={initialThread} user={{ id: user.id, email: user.email }} providerStatus={getProviderStatus()} missingChat={missingChat} />;
 }

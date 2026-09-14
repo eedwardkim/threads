@@ -47,7 +47,7 @@ export interface ClientUser {
   email: string | null;
 }
 
-export function ChatApp({ initialData, providerStatus, initialThread = null, user }: { initialData: AppData; providerStatus: ProviderStatus; initialThread?: ThreadData | null; user: ClientUser }) {
+export function ChatApp({ initialData, providerStatus, initialThread = null, user, missingChat = false }: { initialData: AppData; providerStatus: ProviderStatus; initialThread?: ThreadData | null; user: ClientUser; missingChat?: boolean }) {
   useState(() => {
     bindClientUser(user.id);
     if (initialData.current) chatCache.setChat(initialData.current);
@@ -90,6 +90,11 @@ export function ChatApp({ initialData, providerStatus, initialThread = null, use
   const unavailable = !providerStatus.mock && (!providerStatus.deepseek && !providerStatus.anthropic && !providerStatus.openai);
 
   useEffect(() => { document.documentElement.dataset.theme = theme; }, [theme]);
+  useEffect(() => {
+    if (!missingChat) return;
+    updateLocation(currentId.current, null);
+    toast.error("That conversation no longer exists.");
+  }, [missingChat]);
   useEffect(() => {
     if (streams.notice && !streams.notice.messageId) toast.error(streams.notice.message);
   }, [streams.notice]);
