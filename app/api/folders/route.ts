@@ -1,6 +1,5 @@
 import { z } from "zod";
-import { getRepository } from "@/lib/db/repository";
-import { apiError, assertLocalRequest, readBody, requiredId } from "@/lib/api";
+import { apiError, assertLocalRequest, json, readBody, requiredId, withApiUser } from "@/lib/api";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -15,7 +14,8 @@ const patchSchema = z.union([
 
 export async function GET() {
   try {
-    return Response.json({ folders: getRepository().listFolders() });
+    const { repository } = await withApiUser();
+    return json({ folders: await repository.listFolders() });
   } catch (error) {
     return apiError(error);
   }
@@ -24,8 +24,9 @@ export async function GET() {
 export async function POST(request: Request) {
   try {
     const body = await readBody(request, createSchema);
-    const folder = getRepository().createFolder(body.name, body.parentId ?? null);
-    return Response.json({ folder }, { status: 201 });
+    const { repository } = await withApiUser();
+    const folder = await repository.createFolder(body.name, body.parentId ?? null);
+    return json({ folder }, { status: 201 });
   } catch (error) {
     return apiError(error);
   }
@@ -35,9 +36,9 @@ export async function PATCH(request: Request) {
   try {
     const body = await readBody(request, patchSchema);
     const id = requiredId(new URL(request.url).searchParams.get("id"));
-    const repository = getRepository();
-    const folder = "name" in body ? repository.renameFolder(id, body.name) : repository.moveFolder(id, body.parentId);
-    return Response.json({ folder });
+    const { repository } = await withApiUser();
+    const folder = "name" in body ? await repository.renameFolder(id, body.name) : await repository.moveFolder(id, body.parentId);
+    return json({ folder });
   } catch (error) {
     return apiError(error);
   }
@@ -46,8 +47,10 @@ export async function PATCH(request: Request) {
 export async function DELETE(request: Request) {
   try {
     assertLocalRequest(request);
-    getRepository().deleteFolder(requiredId(new URL(request.url).searchParams.get("id")));
-    return Response.json({ ok: true });
+    const id = requiredId(new URL(request.url).searchParams.get("id"));
+    const { repository } = await withApiUser();
+    await repository.deleteFolder(id);
+    return json({ ok: true });
   } catch (error) {
     return apiError(error);
   }

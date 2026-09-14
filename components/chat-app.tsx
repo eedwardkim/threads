@@ -4,11 +4,12 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import { Menu, Pencil, Plus } from "lucide-react";
 import { ProviderBanner } from "./provider-banner";
 import { Toaster, toast } from "sonner";
+import { chatCache } from "@/lib/chat-cache";
 import { requestJson, errorText } from "@/lib/client-api";
+import { bindClientUser, clearPrivateClientState } from "@/lib/client-state";
 import { mergeMessages } from "@/lib/merge-messages";
-import { demoChat } from "@/lib/demo-catalog";
 import { useThemePreference } from "@/lib/preferences";
-import { streamStore, useStreams } from "@/lib/stream-store";
+import { scopeKey, streamStore, useStreams } from "@/lib/stream-store";
 import { useNarrowScreen } from "@/lib/use-narrow-screen";
 import type { AppData, Chat, ChatData, Folder, ProviderStatus, SearchResult, Thread, ThreadData } from "@/lib/types";
 import { Sidebar } from "./sidebar";
@@ -41,7 +42,18 @@ function EditableTitle({ title, disabled, onRename }: { title: string; disabled:
   </div>;
 }
 
-export function ChatApp({ initialData, providerStatus, initialThread = null }: { initialData: AppData; providerStatus: ProviderStatus; initialThread?: ThreadData | null }) {
+export interface ClientUser {
+  id: string;
+  email: string | null;
+}
+
+export function ChatApp({ initialData, providerStatus, initialThread = null, user, missingChat = false }: { initialData: AppData; providerStatus: ProviderStatus; initialThread?: ThreadData | null; user: ClientUser; missingChat?: boolean }) {
+  useState(() => {
+    bindClientUser(user.id);
+    if (initialData.current) chatCache.setChat(initialData.current);
+    if (initialThread) chatCache.setThread(initialThread);
+    return true;
+  });
   const [chats, setChats] = useState(initialData.chats);
   const [folders, setFolders] = useState(initialData.folders);
   const [current, setCurrent] = useState(initialData.current);
@@ -59,6 +71,7 @@ export function ChatApp({ initialData, providerStatus, initialThread = null }: {
   const [deletePending, setDeletePending] = useState(false);
   const [restoringDemo, setRestoringDemo] = useState(false);
   const [threadPending, setThreadPending] = useState(false);
+  const [loadingChatId, setLoadingChatId] = useState<string | null>(null);
   const threadPendingRef = useRef(false);
   const currentId = useRef(current?.chat.id ?? null);
   const threadId = useRef(activeThreadId);
@@ -72,11 +85,16 @@ export function ChatApp({ initialData, providerStatus, initialThread = null }: {
   const threadWidthRef = useRef(340);
   const shellRef = useRef<HTMLDivElement>(null);
   const streams = useStreams();
-  const mainSession = streams.sessions.get(null);
+  const mainSession = current ? streams.sessions.get(scopeKey(current.chat.id, null)) : undefined;
   const messages = useMemo(() => current ? mergeMessages(current.messages, mainSession, current.chat.id) : [], [current, mainSession]);
   const unavailable = !providerStatus.mock && (!providerStatus.deepseek && !providerStatus.anthropic && !providerStatus.openai);
 
   useEffect(() => { document.documentElement.dataset.theme = theme; }, [theme]);
+  useEffect(() => {
+    if (!missingChat) return;
+    updateLocation(currentId.current, null);
+    toast.error("That conversation no longer exists.");
+  }, [missingChat]);
   useEffect(() => {
     if (streams.notice && !streams.notice.messageId) toast.error(streams.notice.message);
   }, [streams.notice]);
@@ -151,17 +169,54 @@ export function ChatApp({ initialData, providerStatus, initialThread = null }: {
     returnFocus.current = document.activeElement as HTMLElement;
     threadId.current = id;
     setActiveThreadId(id);
-    setThreadData((existing) => existing?.thread.id === id ? existing : null);
+    const cached = chatCache.getThread(id);
+    setThreadData((existing) => existing?.thread.id === id ? existing : cached?.thread.chatId === currentId.current ? cached : null);
     setMobileOpen(false);
     updateLocation(currentId.current, id);
     try {
       const data = await requestJson<ThreadData>(`/api/threads?id=${encodeURIComponent(id)}`);
+      chatCache.setThread(data);
       if (version === threadVersion.current && data.thread.chatId === currentId.current) setThreadData(data);
     } catch (error) {
       if (version === threadVersion.current) { closeThread(); toast.error(errorText(error)); }
     }
   }, [closeThread]);
 
+  /** Applies an authoritative chat view: current pane, cache, and the library entry (title, folder). */
+  const applyChat = useCallback((data: ChatData) => {
+    chatCache.setChat(data);
+    setChats((existing) => existing.some((chat) => chat.id === data.chat.id)
+      ? existing.map((chat) => chat.id === data.chat.id ? data.chat : chat)
+      : [data.chat, ...existing]);
+    if (data.chat.id === currentId.current) setCurrent(data);
+  }, []);
+
+  /** Revalidates one chat (and its open thread) in parallel; other views are left alone. */
+  const refreshScope = useCallback(async (scope: { chatId: string; threadId: string | null }) => {
+    const version = loadVersion.current;
+    const selected = threadId.current;
+    const wantThread = scope.threadId ?? (selected && scope.chatId === currentId.current ? selected : null);
+    const [chatResult, threadResult] = await Promise.allSettled([
+      requestJson<ChatData>(`/api/chats?id=${encodeURIComponent(scope.chatId)}`),
+      wantThread ? requestJson<ThreadData>(`/api/threads?id=${encodeURIComponent(wantThread)}`) : Promise.resolve(null),
+    ]);
+    if (chatResult.status === "fulfilled") {
+      if (version === loadVersion.current) applyChat(chatResult.value);
+    } else if (chatResult.reason instanceof Error && "status" in chatResult.reason && chatResult.reason.status === 404) {
+      chatCache.dropChat(scope.chatId);
+      setChats((existing) => existing.filter((chat) => chat.id !== scope.chatId));
+      if (scope.chatId === currentId.current && version === loadVersion.current) { currentId.current = null; setCurrent(null); closeThread(); }
+    } else throw chatResult.reason;
+    if (threadResult.status === "fulfilled" && threadResult.value) {
+      chatCache.setThread(threadResult.value);
+      if (threadResult.value.thread.id === threadId.current && version === loadVersion.current) setThreadData(threadResult.value);
+    } else if (threadResult.status === "rejected" && wantThread) {
+      chatCache.dropThread(wantThread);
+      if (wantThread === threadId.current) closeThread();
+    }
+  }, [applyChat, closeThread]);
+
+  /** Full reconciliation with committed server state (library plus the current view). */
   const refresh = useCallback(async () => {
     const version = ++loadVersion.current;
     const result = await requestJson<{ chats: Chat[]; folders: Folder[] }>("/api/chats");
@@ -171,22 +226,28 @@ export function ChatApp({ initialData, providerStatus, initialThread = null }: {
     const id = result.chats.some((chat) => chat.id === currentId.current) ? currentId.current : result.chats[0]?.id;
     currentId.current = id ?? null;
     if (!id) { setCurrent(null); closeThread(); return; }
-    const data = await requestJson<ChatData>(`/api/chats?id=${encodeURIComponent(id)}`);
-    if (version !== loadVersion.current || id !== currentId.current) return;
-    setCurrent(data);
-    const selected = threadId.current;
-    if (selected && data.threads.some((thread) => thread.id === selected)) {
-      const thread = await requestJson<ThreadData>(`/api/threads?id=${encodeURIComponent(selected)}`);
-      if (selected === threadId.current && id === currentId.current) setThreadData(thread);
-    } else if (selected) closeThread();
+    await refreshScope({ chatId: id, threadId: null });
+    if (version !== loadVersion.current) return;
+    if (threadId.current && !chatCache.getThread(threadId.current)) closeThread();
     updateLocation(id, threadId.current);
-  }, [closeThread]);
+  }, [closeThread, refreshScope]);
 
   useEffect(() => {
-    const listener = () => { void refresh().catch((error) => toast.error(errorText(error))); };
+    const listener = (event: Event) => {
+      const detail = (event as CustomEvent<{ chatId: string; threadId: string | null } | undefined>).detail;
+      const task = detail ? refreshScope(detail) : refresh();
+      void task.catch((error) => toast.error(errorText(error)));
+    };
+    const visible = () => {
+      if (document.visibilityState === "visible" && currentId.current) void refreshScope({ chatId: currentId.current, threadId: null }).catch(() => undefined);
+    };
     window.addEventListener("threads:refresh", listener);
-    return () => window.removeEventListener("threads:refresh", listener);
-  }, [refresh]);
+    document.addEventListener("visibilitychange", visible);
+    return () => {
+      window.removeEventListener("threads:refresh", listener);
+      document.removeEventListener("visibilitychange", visible);
+    };
+  }, [refresh, refreshScope]);
 
   useEffect(() => {
     const keyboard = (event: KeyboardEvent) => {
@@ -210,18 +271,25 @@ export function ChatApp({ initialData, providerStatus, initialThread = null }: {
     setMainFocus(null);
     setThreadFocus(null);
     setMobileOpen(false);
+    const cached = chatCache.getChat(id);
+    const known = chats.find((chat) => chat.id === id);
+    // Cached content appears immediately; otherwise show the shell for that chat while it loads.
+    if (cached) setCurrent(cached);
+    else if (known) { setCurrent({ chat: known, messages: [], threads: [] }); setLoadingChatId(id); }
+    updateLocation(id, null);
     try {
       const data = await requestJson<ChatData>(`/api/chats?id=${encodeURIComponent(id)}`);
       if (version !== loadVersion.current) return;
-      setCurrent(data);
-      updateLocation(id, null);
+      applyChat(data);
     } catch (error) { toast.error(errorText(error)); }
-  }, [closeThread, closeSearch]);
+    finally { if (version === loadVersion.current) setLoadingChatId(null); }
+  }, [applyChat, chats, closeThread, closeSearch]);
 
   const newChat = useCallback(async (folderId: string | null = null) => {
     try {
       const { chat } = await requestJson<{ chat: Chat }>("/api/chats", { method: "POST", body: JSON.stringify({ folderId }) });
       setChats((existing) => [chat, ...existing]);
+      chatCache.setChat({ chat, messages: [], threads: [] });
       await selectChat(chat.id);
     } catch (error) { toast.error(errorText(error)); }
   }, [selectChat]);
@@ -251,6 +319,8 @@ export function ChatApp({ initialData, providerStatus, initialThread = null }: {
   const renameThread = useCallback(async (threadId: string, title: string) => {
     try {
       const data = await requestJson<ThreadData>(`/api/threads?id=${encodeURIComponent(threadId)}`, { method: "PATCH", body: JSON.stringify({ title }) });
+      chatCache.setThread(data);
+      if (data.thread.id === threadId) setThreadData((existing) => existing?.thread.id === data.thread.id ? data : existing);
       setCurrent((cur) => cur ? { ...cur, threads: cur.threads.map((t) => t.id === data.thread.id ? data.thread : t) } : cur);
     } catch (error) { toast.error(errorText(error)); }
   }, []);
@@ -294,6 +364,7 @@ export function ChatApp({ initialData, providerStatus, initialThread = null }: {
     if (!threadData || streams.locked) return;
     try {
       const data = await requestJson<ThreadData>(`/api/threads?id=${encodeURIComponent(threadData.thread.id)}`, { method: "PATCH", body: JSON.stringify({ resolved: !threadData.thread.resolved }) });
+      chatCache.setThread(data);
       if (data.thread.id === threadId.current) setThreadData(data);
       setCurrent((current) => current ? { ...current, threads: current.threads.map((thread) => thread.id === data.thread.id ? data.thread : thread) } : current);
       toast.success(data.thread.resolved ? "Thread resolved." : "Thread reopened.");
@@ -305,6 +376,7 @@ export function ChatApp({ initialData, providerStatus, initialThread = null }: {
     const id = threadData.thread.id;
     try {
       const data = await streamStore.runOperation("Updating thread context…", (signal) => requestJson<ThreadData>(`/api/threads?id=${encodeURIComponent(id)}`, { method: "PATCH", signal, body: JSON.stringify({ action: "refresh" }) }));
+      chatCache.setThread(data);
       if (id === threadId.current) setThreadData(data);
       setCurrent((current) => current ? { ...current, threads: current.threads.map((thread) => thread.id === data.thread.id ? data.thread : thread) } : current);
       toast.success("Thread context updated.");
@@ -316,7 +388,7 @@ export function ChatApp({ initialData, providerStatus, initialThread = null }: {
   async function copyToMain(messageId: string) {
     try {
       const { message } = await requestJson<{ message: { id: string; chatId: string } }>("/api/messages", { method: "POST", body: JSON.stringify({ action: "copy-to-main", messageId }) });
-      await refresh();
+      await refreshScope({ chatId: message.chatId, threadId: null });
       if (message.chatId === currentId.current) {
         setMainFocus({ id: message.id, nonce: ++focusVersion.current });
         if (narrow) closeThread();
@@ -348,16 +420,29 @@ export function ChatApp({ initialData, providerStatus, initialThread = null }: {
     try {
       const resource = deleting.kind === "chat" ? "chats" : deleting.kind === "folder" ? "folders" : "threads";
       await requestJson(`/api/${resource}?id=${encodeURIComponent(deleting.id)}`, { method: "DELETE" });
+      if (deleting.kind === "chat") chatCache.dropChat(deleting.id);
+      if (deleting.kind === "thread") chatCache.dropThread(deleting.id);
       if (deleting.kind === "chat" && currentId.current === deleting.id) { currentId.current = null; closeThread(); closeSearch(); }
       if (deleting.kind === "thread" && threadId.current === deleting.id) closeThread();
       setDeleting(null);
-      await refresh();
+      if (deleting.kind === "thread" && currentId.current) await refreshScope({ chatId: currentId.current, threadId: null });
+      else await refresh();
       toast.success(deleting.kind === "chat" ? "Conversation deleted." : deleting.kind === "folder" ? "Folder deleted. Conversations moved to Unsorted." : "Thread deleted. The original answer is unchanged.");
     } catch (error) { toast.error(errorText(error)); }
     finally { setDeletePending(false); }
   }
 
+  async function signOut() {
+    streamStore.stopAll();
+    try {
+      await fetch("/auth/signout", { method: "POST", headers: { Accept: "application/json" } });
+    } catch {}
+    clearPrivateClientState();
+    window.location.replace("/login");
+  }
+
   const movingChat = movingChatId ? chats.find((chat) => chat.id === movingChatId) : null;
+  const loadingCurrent = current !== null && loadingChatId === current.chat.id && current.messages.length === 0;
   const threadOpen = activeThreadId !== null || threadPending;
   const nameKind = naming?.kind === "chat" ? "conversation" : "folder";
   const deletingLabel = deleting?.kind === "chat" ? "conversation" : deleting?.kind ?? "conversation";
@@ -376,14 +461,16 @@ export function ChatApp({ initialData, providerStatus, initialThread = null }: {
         onDropChat={(chatId, folderId) => void moveChat(chatId, folderId).catch((error) => toast.error(errorText(error)))}
         onRenameThread={(id, title) => void renameThread(id, title)}
         onDeleteThread={(thread) => { setMobileOpen(false); setDeleting({ ...thread, kind: "thread" }); }}
-        mobileOpen={mobileOpen} onCloseMobile={() => setMobileOpen(false)} theme={theme} onToggleTheme={toggleTheme} locked={streams.locked} searchOpen={searchOpen} onSearch={showSearch} onSwitcher={() => setSwitcherOpen(true)}>
+        mobileOpen={mobileOpen} onCloseMobile={() => setMobileOpen(false)} theme={theme} onToggleTheme={toggleTheme} locked={streams.locked} searchOpen={searchOpen} onSearch={showSearch} onSwitcher={() => setSwitcherOpen(true)}
+        userEmail={user.email} onSignOut={() => void signOut()}>
         {searchOpen && <SearchPanel key={current?.chat.id ?? "empty"} chatId={current?.chat.id ?? null} onClose={closeSearch} onSelect={openSearchResult} />}
       </Sidebar>
       {!narrow && <div className="resize-handle" onMouseDown={(e) => { e.preventDefault(); startResize('sidebar', e.clientX); }} onDoubleClick={() => { shellRef.current?.style.setProperty('--sidebar-width', '220px'); sidebarWidthRef.current = 220; try { localStorage.removeItem('threads:sidebar-width'); } catch {} }} />}
       <main className="main-pane" inert={Boolean(narrow && threadOpen)}>
-        <header className="main-header"><div className="main-title"><Button variant="ghost" size="icon" className="mobile-only" aria-label="Open navigation" onClick={() => setMobileOpen(true)}><Menu /></Button><EditableTitle title={current?.chat.title ?? "A fresh page"} disabled={!current} onRename={() => { if (current) setNaming({ kind: "chat", chat: current.chat }); }} /></div>{current && demoChat(current.chat.id) && <span className="demo-chat-badge" title="Prewritten study history. Your own follow-ups are saved normally.">Study demo</span>}</header>
+        <header className="main-header"><div className="main-title"><Button variant="ghost" size="icon" className="mobile-only" aria-label="Open navigation" onClick={() => setMobileOpen(true)}><Menu /></Button><EditableTitle title={current?.chat.title ?? "A fresh page"} disabled={!current} onRename={() => { if (current) setNaming({ kind: "chat", chat: current.chat }); }} /></div>{current?.chat.demoKey && <span className="demo-chat-badge" title="Prewritten study history. Your own follow-ups are saved normally.">Study demo</span>}</header>
         <ProviderBanner status={providerStatus} errorCode={streams.notice?.code} />
-        {current && messages.length > 0 ? <MessageList key={current.chat.id} chatId={current.chat.id} threadId={null} messages={messages} threads={current.threads} activeThreadId={activeThreadId} onOpenThread={openThread} session={mainSession} locked={streams.locked} focus={mainFocus} /> : <div className="empty-conversation"><Logo size={46} /><h2>A little room to think.</h2><p>Start with a question. Follow the parts<br />that deserve their own thread.</p>{!current && <Button variant="outline" onClick={() => void newChat()}><Plus size={16} />Start a conversation</Button>}</div>}
+        {loadingCurrent ? <div className="conversation-skeleton" aria-busy="true" aria-label="Loading conversation"><div className="skeleton-line w-2/3" /><div className="skeleton-line" /><div className="skeleton-line w-5/6" /><div className="skeleton-line w-1/2" /></div>
+          : current && messages.length > 0 ? <MessageList key={current.chat.id} chatId={current.chat.id} threadId={null} messages={messages} threads={current.threads} activeThreadId={activeThreadId} onOpenThread={openThread} session={mainSession} locked={streams.locked} focus={mainFocus} /> : <div className="empty-conversation"><Logo size={46} /><h2>A little room to think.</h2><p>Start with a question. Follow the parts<br />that deserve their own thread.</p>{!current && <Button variant="outline" onClick={() => void newChat()}><Plus size={16} />Start a conversation</Button>}</div>}
         {current && <Composer key={`composer:${current.chat.id}`} chatId={current.chat.id} threadId={null} messages={messages} disabled={unavailable} focusOnMount={messages.length === 0} providerStatus={providerStatus} />}
       </main>
       {!narrow && threadOpen && <div className="resize-handle" onMouseDown={(e) => { e.preventDefault(); startResize('thread', e.clientX); }} onDoubleClick={() => { shellRef.current?.style.setProperty('--thread-width', '340px'); threadWidthRef.current = 340; try { localStorage.removeItem('threads:thread-width'); } catch {} }} />}

@@ -1,7 +1,9 @@
+import { redirect } from "next/navigation";
 import { ChatApp } from "@/components/chat-app";
-import { getRepository } from "@/lib/db/repository";
+import { currentUser } from "@/lib/auth/server";
+import { dataFor } from "@/lib/db/access";
 import { getProviderStatus } from "@/lib/provider";
-import { ensureDemoChat } from "@/lib/seed";
+import { ensureDemoChat, seedIfNeeded } from "@/lib/seed";
 import { getThreadData } from "@/lib/thread-service";
 
 export const dynamic = "force-dynamic";
@@ -9,12 +11,18 @@ export const runtime = "nodejs";
 
 export default async function Page({ searchParams }: { searchParams: Promise<{ chat?: string; thread?: string }> }) {
   const params = await searchParams;
-  const repository = getRepository();
-  const chats = repository.listChats();
-  const folders = repository.listFolders();
-  const chat = chats.find((item) => item.id === params.chat) ?? chats[0];
-  if (chat) await ensureDemoChat(repository, chat.id);
-  const current = chat ? { chat, messages: repository.listMessages(chat.id), threads: repository.listThreads(chat.id) } : null;
-  const initialThread = params.thread && current?.threads.some((thread) => thread.id === params.thread) ? getThreadData(params.thread) : null;
-  return <ChatApp initialData={{ chats, folders, current }} initialThread={initialThread} providerStatus={getProviderStatus()} />;
+  const user = await currentUser();
+  if (!user) redirect("/login");
+  const { repository } = dataFor(user.id);
+  await seedIfNeeded(repository);
+  let library = await repository.library(params.chat);
+  if (library.current && library.current.chat.demoKey && library.current.messages.length === 0) {
+    await ensureDemoChat(repository, library.current.chat.id);
+    library = await repository.library(library.current.chat.id);
+  }
+  const initialThread = params.thread && library.current?.threads.some((thread) => thread.id === params.thread)
+    ? await getThreadData(params.thread, repository)
+    : null;
+  const missingChat = Boolean(params.chat) && library.current?.chat.id !== params.chat;
+  return <ChatApp initialData={library} initialThread={initialThread} user={{ id: user.id, email: user.email }} providerStatus={getProviderStatus()} missingChat={missingChat} />;
 }

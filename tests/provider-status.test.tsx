@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ProviderBanner } from "../components/provider-banner";
 import { readableError } from "../lib/errors";
 import { modelFor } from "../lib/models";
-import { getProviderStatus, requireProviderAvailable, streamChat } from "../lib/provider";
+import { getProviderStatus, requireProviderAvailable, streamChat, compressionProvider } from "../lib/provider";
 import type { ProviderChunk } from "../lib/providers/types";
 
 afterEach(() => {
@@ -13,12 +13,35 @@ afterEach(() => {
 });
 
 describe("server-only provider status", () => {
-  it("defaults to a working mock without any environment variable", () => {
+  it("never enables mock inference implicitly; USE_MOCK=true is an explicit opt-in", () => {
     vi.stubEnv("USE_MOCK", undefined);
     vi.stubEnv("DEEPSEEK_API_KEY", undefined);
     vi.stubEnv("ANTHROPIC_API_KEY", undefined);
     vi.stubEnv("OPENAI_API_KEY", undefined);
+    expect(getProviderStatus()).toEqual({ mock: false, deepseek: false, anthropic: false, openai: false });
+    expect(() => requireProviderAvailable("fast")).toThrowError(expect.objectContaining({ code: "missing_key" }));
+    vi.stubEnv("USE_MOCK", "true");
     expect(getProviderStatus()).toEqual({ mock: true, deepseek: false, anthropic: false, openai: false });
+  });
+
+  it("refuses mock inference in a production deployment", () => {
+    vi.stubEnv("USE_MOCK", "true");
+    vi.stubEnv("VERCEL_ENV", "production");
+    vi.stubEnv("THREADS_ALLOW_MOCK_IN_PRODUCTION", undefined);
+    expect(() => getProviderStatus()).toThrowError(expect.objectContaining({ code: "mock_forbidden" }));
+  });
+
+  it("chooses the compression provider from configured credentials", () => {
+    vi.stubEnv("USE_MOCK", "false");
+    vi.stubEnv("THREADS_COMPRESSION_PROVIDER", undefined);
+    vi.stubEnv("DEEPSEEK_API_KEY", undefined);
+    vi.stubEnv("ANTHROPIC_API_KEY", "test-only-not-a-real-key");
+    vi.stubEnv("OPENAI_API_KEY", undefined);
+    expect(compressionProvider()).toBe("anthropic");
+    vi.stubEnv("THREADS_COMPRESSION_PROVIDER", "openai");
+    expect(compressionProvider()).toBeNull();
+    vi.stubEnv("THREADS_COMPRESSION_PROVIDER", "nope");
+    expect(() => compressionProvider()).toThrowError(expect.objectContaining({ code: "invalid_config" }));
   });
 
   it("returns only booleans and never the API key", () => {
@@ -107,7 +130,7 @@ describe("provider routing", () => {
   });
 
   it("does not throw in mock mode regardless of keys", () => {
-    vi.stubEnv("USE_MOCK", undefined);
+    vi.stubEnv("USE_MOCK", "true");
     vi.stubEnv("DEEPSEEK_API_KEY", undefined);
     vi.stubEnv("ANTHROPIC_API_KEY", undefined);
     vi.stubEnv("OPENAI_API_KEY", undefined);
@@ -117,7 +140,7 @@ describe("provider routing", () => {
   });
 
   it("routes streamChat to the mock provider in mock mode", async () => {
-    vi.stubEnv("USE_MOCK", undefined);
+    vi.stubEnv("USE_MOCK", "true");
     vi.stubEnv("DEEPSEEK_API_KEY", undefined);
     const chunks: unknown[] = [];
     for await (const chunk of streamChat({ messages: [{ role: "user", content: "hi" }], modelKey: "fast" })) chunks.push(chunk);

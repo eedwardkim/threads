@@ -3,7 +3,6 @@
 import { memo, useLayoutEffect, useMemo, useRef } from "react";
 import { ArrowDown, CornerUpLeft, Pause, RotateCcw, UserRound } from "lucide-react";
 import { DEFAULT_MODEL, PROVIDER_LABEL, modelFor } from "@/lib/models";
-import { demoChat } from "@/lib/demo-catalog";
 import { streamStore, type StreamSession } from "@/lib/stream-store";
 import type { Message, Thread } from "@/lib/types";
 import { Markdown } from "./markdown";
@@ -27,7 +26,7 @@ const MessageCard = memo(function MessageCard({ message, threads, activeThreadId
   const anchors = useMemo(() => threads.filter((thread) => thread.parentMessageId === message.id), [threads, message.id]);
   const selectable = message.role === "assistant" && message.complete && message.threadId === null && !locked;
   const time = new Date(message.createdAt);
-  const prewritten = message.modelKey === null && Boolean(demoChat(message.chatId));
+  const prewritten = message.modelKey === null && message.role === "assistant";
   return (
     <article className={`message ${message.role}-message`} data-message-id={message.id} data-role={message.role} data-complete={String(message.complete)} data-scope={message.threadId ? "thread" : "main"} aria-busy={streaming}>
       <header className="message-header">

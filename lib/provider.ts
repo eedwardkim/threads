@@ -14,13 +14,42 @@ const ENV_VAR: Record<ProviderId, string> = {
   openai: "OPENAI_API_KEY",
 };
 
+const PROVIDER_ORDER: ProviderId[] = ["deepseek", "anthropic", "openai"];
+
+/**
+ * Mock inference is an explicit opt-in (`USE_MOCK=true`) meant for development and tests.
+ * Production deployments never fall back to it: a missing key fails clearly at request time.
+ */
+export function mockEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
+  if (env.USE_MOCK !== "true") return false;
+  if (env.VERCEL_ENV === "production" && env.THREADS_ALLOW_MOCK_IN_PRODUCTION !== "true") {
+    throw new AppError("Mock inference is not allowed in production. Unset USE_MOCK and configure a provider key.", 503, "mock_forbidden");
+  }
+  return true;
+}
+
 export function getProviderStatus(): ProviderStatus {
   return {
-    mock: process.env.USE_MOCK !== "false",
+    mock: mockEnabled(),
     deepseek: Boolean(process.env.DEEPSEEK_API_KEY?.trim()),
     anthropic: Boolean(process.env.ANTHROPIC_API_KEY?.trim()),
     openai: Boolean(process.env.OPENAI_API_KEY?.trim()),
   };
+}
+
+/**
+ * The provider used to compress briefings is a server-side choice: `THREADS_COMPRESSION_PROVIDER`
+ * when set (and its key is configured), otherwise the first provider with credentials.
+ */
+export function compressionProvider(status: ProviderStatus = getProviderStatus()): ProviderId | null {
+  const requested = process.env.THREADS_COMPRESSION_PROVIDER?.trim();
+  if (requested) {
+    if (!PROVIDER_ORDER.includes(requested as ProviderId)) {
+      throw new AppError(`THREADS_COMPRESSION_PROVIDER must be one of ${PROVIDER_ORDER.join(", ")}.`, 503, "invalid_config");
+    }
+    return status[requested as ProviderId] ? (requested as ProviderId) : null;
+  }
+  return PROVIDER_ORDER.find((provider) => status[provider]) ?? null;
 }
 
 function thinkingParameters(thinking: boolean) {
@@ -56,15 +85,16 @@ function createProvider(providerId: ProviderId, apiKey: string): ChatProvider {
 }
 
 function getCompressProvider(): ChatProvider {
-  if (getProviderStatus().mock) return mockProvider;
-  const apiKey = process.env.DEEPSEEK_API_KEY?.trim();
-  if (!apiKey) {
-    throw new AppError("Set DEEPSEEK_API_KEY in .env.local and restart, or set USE_MOCK=true to use the local demo.", 503, "missing_key");
+  const status = getProviderStatus();
+  if (status.mock) return mockProvider;
+  const providerId = compressionProvider(status);
+  if (!providerId) {
+    throw new AppError("No provider key is configured for context compression. Set DEEPSEEK_API_KEY, ANTHROPIC_API_KEY, or OPENAI_API_KEY (or THREADS_COMPRESSION_PROVIDER to a configured provider).", 503, "missing_key");
   }
-  let cached = providerCache.get("deepseek");
+  let cached = providerCache.get(providerId);
   if (!cached) {
-    cached = createDeepSeekProvider({ apiKey, requestOptions: thinkingParameters });
-    providerCache.set("deepseek", cached);
+    cached = createProvider(providerId, process.env[ENV_VAR[providerId]]!.trim());
+    providerCache.set(providerId, cached);
   }
   return cached;
 }

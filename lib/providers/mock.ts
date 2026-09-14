@@ -64,12 +64,57 @@ function isLocalFirstTopic(text: string): boolean {
   return /local.first|knowledge.base|sqlite|outbox|sync.*(worker|queue)|offline.*(first|edit|read)|crdt|backlink/i.test(text);
 }
 
+function isMathTopic(text: string): boolean {
+  return /eigen|determinant|integral|derivative|matrix|theorem|prove|gradient|probability|\\\(|\\\[|\$\$/i.test(text);
+}
+
+/** A deterministic, math-heavy answer so render/normalization paths can be profiled without a live model. */
+function mathResponse(request: string, modelKey: StreamInput["modelKey"]): string {
+  const intro = modelFor(modelKey).thinking
+    ? "I'll set up the definitions first, then derive the result step by step."
+    : "Here's the derivation, with the key identities called out.";
+  const sections = Array.from({ length: 6 }, (_, k) => {
+    const n = k + 2;
+    return `### Step ${k + 1}: the case \\(n = ${n}\\)
+
+For an \\(${n} \\times ${n}\\) matrix \\(A\\) with eigenvalues \\(\\lambda_1, \\dots, \\lambda_${n}\\) we have
+\\[
+\\det(A) = \\prod_{i=1}^{${n}} \\lambda_i, \\qquad \\operatorname{tr}(A) = \\sum_{i=1}^{${n}} \\lambda_i .
+\\]
+The characteristic polynomial \\(p(\\lambda) = \\det(\\lambda I - A)\\) expands as
+\\[
+p(\\lambda) = \\lambda^{${n}} - \\operatorname{tr}(A)\\,\\lambda^{${n - 1}} + \\cdots + (-1)^{${n}} \\det(A),
+\\]
+so the coefficient of \\(\\lambda^{${n - 1}}\\) is \\(-\\sum_i \\lambda_i\\) and the constant term is \\((-1)^{${n}} \\prod_i \\lambda_i\\).
+Applying \\(\\int_0^1 x^{${n}}\\,dx = \\frac{1}{${n + 1}}\\) to the normalized trace gives \\(\\frac{\\operatorname{tr}(A)}{${n}} \\cdot \\frac{1}{${n + 1}}\\), which is bounded by \\(\\max_i |\\lambda_i|\\).`;
+  }).join("\n\n");
+  return `## Working through the mathematics
+
+${intro}
+
+> ${markdownExcerpt(request, 180)}
+
+Let \\(A \\in \\mathbb{R}^{n \\times n}\\) be diagonalizable, so \\(A = P D P^{-1}\\) with \\(D = \\operatorname{diag}(\\lambda_1, \\dots, \\lambda_n)\\).
+
+${sections}
+
+### Putting it together
+
+Since \\(\\det(P D P^{-1}) = \\det(P)\\det(D)\\det(P)^{-1} = \\det(D)\\), the determinant is invariant under similarity, and the same argument shows
+\\[
+\\operatorname{tr}(A^k) = \\sum_{i=1}^{n} \\lambda_i^k \\quad \\text{for every } k \\geq 1 .
+\\]
+**Conclusion:** the elementary symmetric polynomials of the eigenvalues are exactly the coefficients of \\(p(\\lambda)\\), up to sign.`;
+}
+
 function genericResponse(request: string, messages: PromptMessage[], modelKey: StreamInput["modelKey"]): string {
   const intro = modelFor(modelKey).thinking
     ? "Let me think through this carefully."
     : "Here's what I'd suggest.";
   const quoted = markdownExcerpt(request, 180);
   const conversationLength = messages.filter((m) => m.role === "user").length;
+
+  if (isMathTopic(request)) return mathResponse(request, modelKey);
 
   if (/^(hi|hello|hey|sup|yo|what'?s up|howdy)\b/i.test(request.trim())) {
     return `Hello! I'm here to help. What would you like to work on?`;

@@ -1,7 +1,7 @@
 "use client";
 
 import { useSyncExternalStore } from "react";
-import { ONE_GENERATION_AT_A_TIME } from "./generation-policy";
+import { currentClientUser, registerPrivateState } from "./client-state";
 import type { ModelKey } from "./models";
 import type { Message, StreamEvent } from "./types";
 
@@ -23,8 +23,11 @@ interface Notice {
 }
 
 interface StreamsSnapshot {
-  sessions: ReadonlyMap<string | null, StreamSession>;
+  /** Keyed by `scopeKey(chatId, threadId)` for the bound user. */
+  sessions: ReadonlyMap<string, StreamSession>;
+  /** A blocking operation (thread preparation, context refresh) is running. */
   locked: boolean;
+  /** At least one stream is in flight. */
   active: boolean;
   operation: string | null;
   notice: Notice | null;
@@ -39,8 +42,14 @@ interface SendInput {
 }
 
 interface ActiveStream extends Pick<StreamSession, "requestId" | "chatId" | "threadId"> {
+  userId: string | null;
+  scope: string;
   controller: AbortController;
   reader: ReadableStreamDefaultReader<Uint8Array> | null;
+}
+
+export function scopeKey(chatId: string, threadId: string | null): string {
+  return `${chatId}:${threadId ?? "main"}`;
 }
 
 const initialSnapshot: StreamsSnapshot = { sessions: new Map(), locked: false, active: false, operation: null, notice: null };
@@ -51,7 +60,7 @@ let operation: { label: string; controller: AbortController } | null = null;
 let noticeId = 0;
 let listeningForPagehide = false;
 const networkMessage = "The connection was interrupted. Your text is saved. Please retry.";
-const busyMessage = "Another operation is running. Stop it or wait for it to finish.";
+const busyMessage = "This conversation is still answering. Stop it or wait for it to finish.";
 
 class StreamFailure extends Error {
   constructor(message = networkMessage, public code = "network") {
@@ -61,19 +70,18 @@ class StreamFailure extends Error {
 }
 
 function publish(sessions = snapshot.sessions, notice = snapshot.notice): void {
-  const active = requests.size > 0 || operation !== null;
-  snapshot = { sessions, notice, active, locked: ONE_GENERATION_AT_A_TIME && active, operation: operation?.label ?? null };
+  snapshot = { sessions, notice, active: requests.size > 0, locked: operation !== null, operation: operation?.label ?? null };
   listeners.forEach((listener) => listener());
 }
 
 function sessionFor(stream: ActiveStream): StreamSession | undefined {
-  const session = snapshot.sessions.get(stream.threadId);
-  return session?.requestId === stream.requestId && session.chatId === stream.chatId ? session : undefined;
+  const session = snapshot.sessions.get(stream.scope);
+  return session?.requestId === stream.requestId ? session : undefined;
 }
 
 function update(stream: ActiveStream, changes: Partial<StreamSession>, notice = snapshot.notice): void {
   const session = sessionFor(stream);
-  if (session) publish(new Map(snapshot.sessions).set(stream.threadId, { ...session, ...changes }), notice);
+  if (session) publish(new Map(snapshot.sessions).set(stream.scope, { ...session, ...changes }), notice);
 }
 
 function report(stream: ActiveStream, error: StreamFailure, messageId?: string): void {
@@ -93,8 +101,8 @@ function finish(stream: ActiveStream, receivedFinish: boolean): void {
   }
 }
 
-function refresh(): void {
-  if (typeof window !== "undefined") window.dispatchEvent(new window.Event("threads:refresh"));
+function refresh(detail: { chatId: string; threadId: string | null }): void {
+  if (typeof window !== "undefined") window.dispatchEvent(new window.CustomEvent("threads:refresh", { detail }));
 }
 
 function isAbort(error: unknown): boolean {
@@ -144,6 +152,11 @@ function releaseReader(stream: ActiveStream): void {
   }
 }
 
+/** A stream is stale when the account changed while it was in flight; its data must not be shown. */
+function stale(stream: ActiveStream): boolean {
+  return stream.userId !== currentClientUser();
+}
+
 async function consume(stream: ActiveStream, reader: ReadableStreamDefaultReader<Uint8Array>): Promise<void> {
   let receivedFinish = false;
   let receivedError = false;
@@ -152,6 +165,7 @@ async function consume(stream: ActiveStream, reader: ReadableStreamDefaultReader
   const accept = (line: string) => {
     if (!line.trim()) return;
     const event = JSON.parse(line) as StreamEvent;
+    if (stale(stream)) throw new StreamFailure();
     receive(stream, event);
     if (event.type === "finish") receivedFinish = true;
     if (event.type === "error") receivedError = true;
@@ -173,13 +187,13 @@ async function consume(stream: ActiveStream, reader: ReadableStreamDefaultReader
     }
     if (!receivedFinish && !receivedError && !stream.controller.signal.aborted) throw new StreamFailure();
   } catch (error) {
-    if (!receivedError && !stream.controller.signal.aborted && !isAbort(error)) {
+    if (!receivedError && !stream.controller.signal.aborted && !isAbort(error) && !stale(stream)) {
       report(stream, error instanceof StreamFailure ? error : new StreamFailure(), sessionFor(stream)?.message?.id);
     }
   } finally {
     releaseReader(stream);
     finish(stream, receivedFinish);
-    refresh();
+    if (!stale(stream)) refresh(stream);
   }
 }
 
@@ -192,23 +206,43 @@ async function responseError(response: Response): Promise<StreamFailure> {
   }
 }
 
+/**
+ * After an ambiguous network failure the request may already have been accepted by the server.
+ * Ask before retrying so a lost response never turns into a duplicate message or provider call.
+ */
+async function reconcile(stream: ActiveStream): Promise<"accepted" | "unknown"> {
+  try {
+    const response = await fetch(`/api/generate?id=${encodeURIComponent(stream.requestId)}`, { cache: "no-store" });
+    if (response.status === 404) return "unknown";
+    if (!response.ok) return "unknown";
+    const body = await response.json() as { job?: { status?: string } | null };
+    return body.job ? "accepted" : "unknown";
+  } catch {
+    return "unknown";
+  }
+}
+
 function watchPagehide(): void {
   if (typeof window !== "undefined" && !listeningForPagehide) {
-    window.addEventListener("pagehide", stop);
+    window.addEventListener("pagehide", stopAll);
     listeningForPagehide = true;
   }
 }
 
 async function send(input: SendInput): Promise<boolean> {
   watchPagehide();
-  const existing = snapshot.sessions.get(input.threadId);
-  if ((existing && existing.phase !== "idle") || (ONE_GENERATION_AT_A_TIME && snapshot.active)) {
+  const scope = scopeKey(input.chatId, input.threadId);
+  const existing = snapshot.sessions.get(scope);
+  if (existing && existing.phase !== "idle") {
     publish(snapshot.sessions, { id: ++noticeId, message: busyMessage, code: "generation_busy" });
     return false;
   }
-  const stream: ActiveStream = { requestId: crypto.randomUUID(), chatId: input.chatId, threadId: input.threadId, controller: new AbortController(), reader: null };
+  const stream: ActiveStream = {
+    requestId: crypto.randomUUID(), chatId: input.chatId, threadId: input.threadId, userId: currentClientUser(), scope,
+    controller: new AbortController(), reader: null,
+  };
   requests.set(stream.requestId, stream);
-  publish(new Map(snapshot.sessions).set(input.threadId, {
+  publish(new Map(snapshot.sessions).set(scope, {
     requestId: stream.requestId, chatId: input.chatId, threadId: input.threadId,
     phase: "connecting", message: null, userMessage: null, error: null,
   }), null);
@@ -228,7 +262,17 @@ async function send(input: SendInput): Promise<boolean> {
     void consume(stream, reader);
     return true;
   } catch (error) {
-    if (!stream.controller.signal.aborted && !isAbort(error)) report(stream, error instanceof StreamFailure ? error : new StreamFailure());
+    if (stream.controller.signal.aborted || isAbort(error) || stale(stream)) return false;
+    if (error instanceof StreamFailure) {
+      report(stream, error);
+      return false;
+    }
+    // Ambiguous transport failure: the server may have accepted the request already.
+    if ((await reconcile(stream)) === "accepted") {
+      report(stream, new StreamFailure("Your message was received but the connection dropped. Reloading the conversation.", "reconnect"));
+      return true;
+    }
+    report(stream, new StreamFailure());
     return false;
   } finally {
     if (!started) {
@@ -237,7 +281,7 @@ async function send(input: SendInput): Promise<boolean> {
       else if (response?.body && !response.body.locked) void response.body.cancel().catch(() => undefined);
       stream.controller.abort();
       finish(stream, false);
-      if (interrupted || response?.ok) refresh();
+      if ((interrupted || response?.ok || snapshot.notice?.code === "reconnect") && !stale(stream)) refresh(stream);
     }
   }
 }
@@ -246,18 +290,26 @@ async function requestStop(requestId: string): Promise<void> {
   await fetch(`/api/generate?id=${encodeURIComponent(requestId)}`, { method: "DELETE", keepalive: true });
 }
 
-function stop(): void {
+function abortStream(stream: ActiveStream): void {
+  void requestStop(stream.requestId).catch(() => undefined);
+  stream.controller.abort();
+  if (stream.reader) void stream.reader.cancel().catch(() => undefined);
+}
+
+/** Stops the stream in one scope (the durable stop request is what actually ends generation). */
+function stop(chatId: string, threadId: string | null): void {
+  const scope = scopeKey(chatId, threadId);
+  for (const stream of requests.values()) if (stream.scope === scope) abortStream(stream);
+}
+
+function stopAll(): void {
   operation?.controller.abort();
-  for (const stream of requests.values()) {
-    void requestStop(stream.requestId).catch(() => undefined);
-    stream.controller.abort();
-    if (stream.reader) void stream.reader.cancel().catch(() => undefined);
-  }
+  for (const stream of requests.values()) abortStream(stream);
 }
 
 async function runOperation<T>(label: string, task: (signal: AbortSignal) => Promise<T>): Promise<T> {
   watchPagehide();
-  if (operation || (ONE_GENERATION_AT_A_TIME && snapshot.active)) throw new StreamFailure(busyMessage, "generation_busy");
+  if (operation) throw new StreamFailure("Another operation is running. Wait for it to finish.", "operation_busy");
   const current = { label, controller: new AbortController() };
   operation = current;
   publish(snapshot.sessions, null);
@@ -268,6 +320,21 @@ async function runOperation<T>(label: string, task: (signal: AbortSignal) => Pro
     publish();
   }
 }
+
+/** Drops all sessions and aborts in-flight work locally (used on sign-out / account switch). */
+function reset(): void {
+  operation?.controller.abort();
+  for (const stream of requests.values()) {
+    stream.controller.abort();
+    if (stream.reader) void stream.reader.cancel().catch(() => undefined);
+  }
+  requests.clear();
+  operation = null;
+  snapshot = initialSnapshot;
+  listeners.forEach((listener) => listener());
+}
+
+registerPrivateState(reset);
 
 function subscribe(listener: () => void): () => void {
   watchPagehide();
@@ -282,4 +349,9 @@ export function useStreams(): StreamsSnapshot {
   return useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot);
 }
 
-export const streamStore = { send, stop, runOperation };
+export function useScopeSession(chatId: string | null, threadId: string | null): StreamSession | undefined {
+  const streams = useStreams();
+  return chatId ? streams.sessions.get(scopeKey(chatId, threadId)) : undefined;
+}
+
+export const streamStore = { send, stop, stopAll, runOperation, reset };

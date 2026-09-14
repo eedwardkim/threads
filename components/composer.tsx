@@ -2,14 +2,16 @@
 
 import { useLayoutEffect, useRef, useState } from "react";
 import { ArrowUp, Brain, Square } from "lucide-react";
+import { currentClientUser, registerPrivateState } from "@/lib/client-state";
 import { MODELS, PROVIDER_LABEL, DEFAULT_MODEL, isModelKey, type ProviderId } from "@/lib/models";
 import { useModelPreference } from "@/lib/preferences";
-import { streamStore, useStreams } from "@/lib/stream-store";
+import { scopeKey, streamStore, useStreams } from "@/lib/stream-store";
 import type { Message, ProviderStatus } from "@/lib/types";
 import { Button } from "./ui/button";
 import { Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectTrigger, SelectValue } from "./ui/select";
 
 const drafts = new Map<string, string>();
+registerPrivateState(() => drafts.clear());
 
 const PROVIDER_ORDER: ProviderId[] = ["deepseek", "anthropic", "openai"];
 
@@ -21,12 +23,12 @@ export function Composer({ chatId, threadId, messages, disabled = false, focusOn
   focusOnMount?: boolean;
   providerStatus: ProviderStatus;
 }) {
-  const scope = `${chatId}:${threadId ?? "main"}`;
+  const scope = `${currentClientUser() ?? "anonymous"}:${scopeKey(chatId, threadId)}`;
   const [draft, setDraft] = useState(() => drafts.get(scope) ?? "");
   const textarea = useRef<HTMLTextAreaElement>(null);
   const streams = useStreams();
-  const session = streams.sessions.get(threadId);
-  const ownActive = session?.chatId === chatId && session.phase !== "idle";
+  const session = streams.sessions.get(scopeKey(chatId, threadId));
+  const ownActive = session !== undefined && session.phase !== "idle";
   const blocked = disabled || streams.locked || ownActive;
   const lastModel = messages.findLast((message) => message.modelKey)?.modelKey ?? DEFAULT_MODEL;
   const [model, setModel] = useModelPreference(scope, lastModel);
@@ -49,7 +51,9 @@ export function Composer({ chatId, threadId, messages, disabled = false, focusOn
 
   async function send() {
     if (blocked || !draft.trim()) return;
-    if (await streamStore.send({ chatId, threadId, content: draft.trim(), modelKey: model })) changeDraft("");
+    const sent = draft;
+    // Only clear the draft the user actually sent; a newer draft typed meanwhile is kept.
+    if (await streamStore.send({ chatId, threadId, content: sent.trim(), modelKey: model }) && drafts.get(scope) === sent) changeDraft("");
   }
 
   return (
@@ -86,7 +90,7 @@ export function Composer({ chatId, threadId, messages, disabled = false, focusOn
             </SelectContent>
           </Select>
           <div className="send-controls">
-            {streams.active ? <Button variant="secondary" size="sm" onClick={() => streamStore.stop()} aria-label="Stop generation" className="stop-button"><Square size={12} fill="currentColor" />Stop</Button> : <>
+            {ownActive ? <Button variant="secondary" size="sm" onClick={() => void streamStore.stop(chatId, threadId)} aria-label="Stop generation" className="stop-button"><Square size={12} fill="currentColor" />Stop</Button> : <>
               <span className="send-hint"><kbd>Enter</kbd></span>
               <Button size="icon" className="send-button" aria-label={threadId ? "Send thread message" : "Send main message"} disabled={blocked || !draft.trim()} onClick={() => void send()}><ArrowUp /></Button>
             </>}

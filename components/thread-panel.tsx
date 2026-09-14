@@ -7,7 +7,7 @@ import remarkMath from "remark-math";
 import rehypeKatex from "rehype-katex";
 import { ArrowLeft, Check, TextQuote, Trash2, X } from "lucide-react";
 import { mergeMessages } from "@/lib/merge-messages";
-import { useStreams } from "@/lib/stream-store";
+import { scopeKey, useStreams } from "@/lib/stream-store";
 import type { ProviderStatus, ThreadData } from "@/lib/types";
 import { ProviderBanner } from "./provider-banner";
 import { Composer } from "./composer";
@@ -63,7 +63,7 @@ export function ThreadPanel({ id, data, narrow, unavailable, providerStatus, err
 }) {
   const panel = useRef<HTMLElement>(null);
   const streams = useStreams();
-  const session = streams.sessions.get(id);
+  const session = data ? streams.sessions.get(scopeKey(data.thread.chatId, id)) : undefined;
   const messages = useMemo(() => data ? mergeMessages(data.messages, session, data.thread.chatId) : [], [data, session]);
 
   useEffect(() => {
