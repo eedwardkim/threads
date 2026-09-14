@@ -2,7 +2,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ProviderBanner } from "../components/provider-banner";
 import { readableError } from "../lib/errors";
-import { modelFor } from "../lib/models";
+import { MODELS, MODEL_KEY_PATTERN, modelFor, selectableModels } from "../lib/models";
 import { getProviderStatus, requireProviderAvailable, streamChat, compressionProvider } from "../lib/provider";
 import type { ProviderChunk } from "../lib/providers/types";
 
@@ -88,13 +88,33 @@ describe("model names", () => {
   it.each([
     ["fast", "DeepSeek Flash (Fast)"],
     ["thinking", "DeepSeek Flash (Thinking)"],
+    ["deepseek-pro", "DeepSeek V4 Pro"],
+    ["opus-5", "Opus 5"],
+    ["sonnet-5", "Sonnet 5"],
+    ["haiku", "Haiku 4.5"],
     ["opus", "Opus 4.8"],
     ["sonnet", "Sonnet 4.5"],
-    ["haiku", "Haiku 4.5"],
+    ["gpt-5.5", "GPT-5.5"],
+    ["gpt-5.4-mini", "GPT-5.4 mini"],
     ["gpt-5", "GPT-5 (original)"],
     ["gpt-5-mini", "GPT-5 mini"],
   ] as const)("identifies the configured %s model", (key, label) => {
     expect(modelFor(key).label).toBe(label);
+  });
+
+  it("keeps every key unique and within the database key format", () => {
+    const keys = MODELS.map((model) => model.key);
+    expect(new Set(keys).size).toBe(keys.length);
+    for (const key of keys) expect(key).toMatch(MODEL_KEY_PATTERN);
+  });
+
+  it("hides legacy models from the picker unless one is already selected", () => {
+    const offered = selectableModels().map((model) => model.key);
+    expect(offered).toEqual(expect.arrayContaining(["fast", "opus-5", "sonnet-5", "haiku", "gpt-5.5", "gpt-5.4-mini"]));
+    expect(offered).not.toContain("opus");
+    expect(offered).not.toContain("gpt-5-mini");
+    expect(selectableModels("opus").map((model) => model.key)).toContain("opus");
+    expect(selectableModels("opus").map((model) => model.key)).not.toContain("sonnet");
   });
 });
 
@@ -152,7 +172,7 @@ describe("Anthropic HTTP adapter", () => {
   let transport: ReturnType<typeof vi.fn<typeof fetch>>;
   const messages = [{ role: "system" as const, content: "A stable prefix." }, { role: "user" as const, content: "Reply with OK." }];
 
-  async function collect(modelKey: "opus" | "sonnet" | "haiku" = "opus") {
+  async function collect(modelKey: "opus" | "sonnet" | "haiku" | "opus-5" | "sonnet-5" = "opus") {
     const chunks: ProviderChunk[] = [];
     for await (const chunk of streamChat({ messages, modelKey })) chunks.push(chunk);
     return chunks;
@@ -170,7 +190,7 @@ describe("Anthropic HTTP adapter", () => {
     expect(modelFor("opus").id).not.toMatch(/-4-1(?:-|$)/);
   });
 
-  it.each(["opus", "sonnet", "haiku"] as const)("streams %s through Messages with compatible settings and measured usage", async (key) => {
+  it.each(["opus", "sonnet", "haiku", "opus-5", "sonnet-5"] as const)("streams %s through Messages with compatible settings and measured usage", async (key) => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     const parts = [
       { type: "message_start", message: { id: "fixture", type: "message", role: "assistant", model: modelFor(key).id, content: [], stop_reason: null, stop_sequence: null, usage: { input_tokens: 12, output_tokens: 0 } } },
@@ -193,8 +213,8 @@ describe("Anthropic HTTP adapter", () => {
       system: [{ type: "text", text: messages[0].content }],
       messages: [{ role: "user", content: [{ type: "text", text: messages[1].content }] }],
     });
-    if (key === "opus") {
-      expect(body).toMatchObject({ max_tokens: 32_000 });
+    expect(body).toMatchObject({ max_tokens: 32_000 });
+    if (key === "opus" || key === "opus-5" || key === "sonnet-5") {
       expect(body).not.toHaveProperty("temperature");
       expect(body).not.toHaveProperty("top_p");
       expect(body).not.toHaveProperty("top_k");

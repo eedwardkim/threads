@@ -56,6 +56,8 @@ describe("ChatRepository (Postgres)", () => {
     await repository.appendMessage({ chatId: chat.id, threadId: null, role: "user", content: "Later title", modelKey: null });
     const reply = await repository.appendMessage({ chatId: chat.id, threadId: null, role: "assistant", content: "Thoughtful answer", modelKey: "thinking" });
     expect((await repository.getMessage(reply.id))?.modelKey).toBe("thinking");
+    const dotted = await repository.appendMessage({ chatId: chat.id, threadId: null, role: "assistant", content: "Newer model answer", modelKey: "gpt-5.5" });
+    expect((await repository.getMessage(dotted.id))?.modelKey).toBe("gpt-5.5");
     expect((await repository.getChat(chat.id))?.title).toBe(content.slice(0, 60));
   });
 
