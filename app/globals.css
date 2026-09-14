@@ -241,7 +241,16 @@ body { overflow: hidden; }
 @keyframes speech-spin { to { transform: rotate(360deg); } }
 .markdown .speech-current { background: color-mix(in srgb, var(--primary) 9%, transparent); box-shadow: 0 0 0 5px color-mix(in srgb, var(--primary) 9%, transparent); border-radius: 3px; transition: background 200ms, box-shadow 200ms; }
 @media (max-width: 640px) { .speech-disclosure { display: none; } }
-.connecting-state { display: flex; align-items: center; gap: 9px; margin: 18px 0; color: var(--muted-foreground); font-size: 12px; }
+.thinking-state { display: flex; align-items: center; gap: 9px; margin: 12px 0; color: var(--muted-foreground); font-size: 12px; min-height: 20px; }
+.message-list-content > .thinking-state { margin: 18px 0; }
+.thinking-strand { flex-shrink: 0; color: var(--primary); animation: strand-sway 3.2s ease-in-out infinite; transform-origin: 50% 50%; }
+.thinking-strand-base { opacity: .3; stroke-dasharray: 81; stroke-dashoffset: 81; animation: strand-draw 2.4s ease-in-out infinite alternate; }
+.thinking-strand-pulse { stroke-dasharray: 14 67; stroke-dashoffset: 81; animation: strand-snake 1.8s linear infinite; }
+.thinking-phrase { animation: phrase-in .45s ease-out both; font-style: italic; letter-spacing: .01em; }
+@keyframes strand-draw { to { stroke-dashoffset: 0; } }
+@keyframes strand-snake { to { stroke-dashoffset: -81; } }
+@keyframes strand-sway { 0%, 100% { transform: rotate(-6deg) scale(1); } 50% { transform: rotate(6deg) scale(1.06); } }
+@keyframes phrase-in { from { opacity: 0; transform: translateY(3px); } to { opacity: 1; transform: none; } }
 .jump-to-latest { position: absolute; left: 50%; bottom: 10px; transform: translateX(-50%); z-index: 5; height: 26px; padding: 0 10px; font-size: 10px; border: 1px solid var(--border); box-shadow: 0 3px 12px #0002; }
 .jump-to-latest[hidden] { display: none; }
 .composer-wrap { flex-shrink: 0; padding: 8px 0 10px; }

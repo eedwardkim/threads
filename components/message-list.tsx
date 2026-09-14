@@ -10,6 +10,7 @@ import { CopyButton } from "./copy-button";
 import { ListenButton, SpeechPlayer, useSpeechHighlight } from "./speech-player";
 import { Button } from "./ui/button";
 import { Logo } from "./logo";
+import { ThinkingIndicator } from "./thinking";
 
 export interface MessageFocus { id: string; nonce: number }
 const scrollMemory = new Map<string, { top: number; following: boolean }>();
@@ -53,8 +54,9 @@ const MessageCard = memo(function MessageCard({ message, threads, activeThreadId
             </a>
           </li>)}
         </ul>}
+        {streaming && message.content === "" && <ThinkingIndicator />}
         {(message.role !== "user" || message.content.trim() !== "") && <Markdown content={message.content} anchors={anchors} activeThreadId={activeThreadId} onOpenThread={onOpenThread} streaming={streaming} selectable={selectable} />}
-        {streaming && <span className="sr-only" role="status">Writing an answer</span>}
+        {streaming && message.content !== "" && <span className="sr-only" role="status">Writing an answer</span>}
         {!message.complete && !streaming && <div className="stopped-state" role="status">
           <Pause size={14} />
           <span>{error ?? "Response stopped. Your text is saved."}</span>
@@ -165,7 +167,7 @@ export function MessageList({ chatId, threadId, messages, threads, activeThreadI
           {messages.map((message) => <MessageCard key={message.id} message={message} threads={threads} activeThreadId={activeThreadId} onOpenThread={onOpenThread}
             streaming={Boolean(active && session?.message?.id === message.id)} locked={locked}
             error={session?.message?.id === message.id ? session.error : null} onCopyToMain={onCopyToMain} />)}
-          {active && !session?.message && <div className="connecting-state" role="status"><Logo size={20} /><span>Connecting to your model…</span></div>}
+          {active && !session?.message && <ThinkingIndicator label="Connecting to your model" />}
         </div>
       </div>
       <Button ref={jump} hidden variant="secondary" size="sm" className="jump-to-latest" onClick={() => {

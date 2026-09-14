@@ -74,3 +74,19 @@ it("pauses even on a one-pixel upward scroll and resumes only at the bottom", as
   notifyResize();
   expect(scroll.scrollTop).toBe(700);
 });
+
+it("shows the thinking indicator only until the first token arrives", async () => {
+  const pending: Message = { ...message, role: "assistant", content: "", complete: false };
+  const session = { chatId: pending.chatId, threadId: null, requestId: "r1", phase: "streaming", message: pending, userMessage: null, error: null } as const;
+  await act(async () => root.render(<MessageList chatId={pending.chatId} threadId={null} messages={[pending]} threads={threads} locked={false} session={session as never} />));
+  expect(host.querySelector(".thinking-state")).not.toBeNull();
+  expect(host.querySelector(".thinking-strand")).not.toBeNull();
+  await act(async () => root.render(<MessageList chatId={pending.chatId} threadId={null} messages={[{ ...pending, content: "Hello" }]} threads={threads} locked={false} session={{ ...session, message: { ...pending, content: "Hello" } } as never} />));
+  expect(host.querySelector(".thinking-state")).toBeNull();
+});
+
+it("shows the thinking indicator while the request is still connecting", async () => {
+  const session = { chatId: message.chatId, threadId: null, requestId: "r2", phase: "connecting", message: null, userMessage: null, error: null } as const;
+  await act(async () => root.render(<MessageList chatId={message.chatId} threadId={null} messages={[message]} threads={threads} locked={false} session={session as never} />));
+  expect(host.querySelector(".thinking-state")?.getAttribute("aria-label")).toBe("Connecting to your model");
+});
