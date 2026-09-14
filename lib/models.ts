@@ -1,3 +1,4 @@
+export const TRANSCRIPTION_MODELS = { openai: "gpt-transcribe", elevenlabs: "scribe_v2" } as const;
 export type ProviderId = "deepseek" | "anthropic" | "openai";
 
 export interface ModelInfo {
