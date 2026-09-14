@@ -9,6 +9,12 @@ interface AnthropicOptions {
   apiKey: string;
 }
 
+/** Claude 5 and Opus models reject sampling overrides; older Sonnet/Haiku still accept a deterministic temperature. */
+function samplingOverrides(model: ReturnType<typeof modelFor>) {
+  const generation = Number(/^claude-[a-z]+-(\d+)/.exec(model.id)?.[1] ?? 0);
+  return generation >= 5 || model.id.startsWith("claude-opus") ? {} : { temperature: 0 };
+}
+
 export function createAnthropicProvider({ apiKey }: AnthropicOptions): ChatProvider {
   const anthropic = createAnthropic({ apiKey });
 
@@ -21,8 +27,8 @@ export function createAnthropicProvider({ apiKey }: AnthropicOptions): ChatProvi
         allowSystemInMessages: false,
         abortSignal: signal,
         maxRetries: 0,
-        maxOutputTokens: model.key === "opus" ? 32_000 : undefined,
-        temperature: model.key === "opus" ? undefined : 0,
+        maxOutputTokens: 32_000,
+        ...samplingOverrides(model),
         onError: () => {},
       });
       yield* consumeStream(result.fullStream, signal, "Claude");

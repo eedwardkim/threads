@@ -3,7 +3,7 @@
 import { useLayoutEffect, useRef, useState } from "react";
 import { ArrowUp, Brain, Square } from "lucide-react";
 import { currentClientUser, registerPrivateState } from "@/lib/client-state";
-import { MODELS, PROVIDER_LABEL, DEFAULT_MODEL, isModelKey, type ProviderId } from "@/lib/models";
+import { MODELS, PROVIDER_LABEL, DEFAULT_MODEL, isModelKey, selectableModels, type ProviderId } from "@/lib/models";
 import { useModelPreference } from "@/lib/preferences";
 import { scopeKey, streamStore, useStreams } from "@/lib/stream-store";
 import type { Message, ProviderStatus } from "@/lib/types";
@@ -77,7 +77,7 @@ export function Composer({ chatId, threadId, messages, disabled = false, focusOn
             </SelectTrigger>
             <SelectContent className="min-w-56">
               {PROVIDER_ORDER.map((providerId) => {
-                const models = MODELS.filter((entry) => entry.provider === providerId);
+                const models = selectableModels(model).filter((entry) => entry.provider === providerId);
                 if (models.length === 0) return null;
                 const available = providerStatus.mock || providerStatus[providerId];
                 return <SelectGroup key={providerId}>
