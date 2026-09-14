@@ -9,7 +9,7 @@ function isPublic(pathname: string): boolean {
 
 /**
  * Refreshes the Supabase session cookie on every request and sends signed-out visitors of
- * private pages to /login. API routes are never redirected: they return JSON 401 themselves so
+ * private pages to /login (the root goes to /welcome instead). API routes are never redirected: they return JSON 401 themselves so
  * fetch and streaming clients see a proper error instead of HTML.
  */
 export async function proxy(request: NextRequest) {
@@ -38,7 +38,7 @@ export async function proxy(request: NextRequest) {
   const pathname = request.nextUrl.pathname;
   if (!data?.claims?.sub && !isPublic(pathname) && !pathname.startsWith("/api/")) {
     const login = request.nextUrl.clone();
-    login.pathname = "/login";
+    login.pathname = pathname === "/" ? "/welcome" : "/login";
     login.search = "";
     const next = `${pathname}${request.nextUrl.search}`;
     if (next !== "/") login.searchParams.set("next", next);
