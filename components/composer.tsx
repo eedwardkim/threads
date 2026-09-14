@@ -1,9 +1,11 @@
 "use client";
 
 import { useLayoutEffect, useRef, useState } from "react";
-import { ArrowUp, Brain, Square } from "lucide-react";
+import { ArrowUp, Brain, ImagePlus, Loader2, Square, X } from "lucide-react";
+import { attachmentStore, isImageFile, usePendingAttachments } from "@/lib/attachment-store";
+import { MAX_ATTACHMENTS_PER_MESSAGE } from "@/lib/attachments/image";
 import { currentClientUser, registerPrivateState } from "@/lib/client-state";
-import { MODELS, PROVIDER_LABEL, DEFAULT_MODEL, isModelKey, selectableModels, type ProviderId } from "@/lib/models";
+import { MODELS, PROVIDER_LABEL, DEFAULT_MODEL, isModelKey, modelFor, selectableModels, type ProviderId } from "@/lib/models";
 import { useModelPreference } from "@/lib/preferences";
 import { scopeKey, streamStore, useStreams } from "@/lib/stream-store";
 import type { Message, ProviderStatus } from "@/lib/types";
@@ -32,6 +34,14 @@ export function Composer({ chatId, threadId, messages, disabled = false, focusOn
   const blocked = disabled || streams.locked || ownActive;
   const lastModel = messages.findLast((message) => message.modelKey)?.modelKey ?? DEFAULT_MODEL;
   const [model, setModel] = useModelPreference(scope, lastModel);
+  const pending = usePendingAttachments(scope);
+  const fileInput = useRef<HTMLInputElement>(null);
+  const [dragging, setDragging] = useState(false);
+  const [attachNote, setAttachNote] = useState<string | null>(null);
+  const uploading = pending.some((item) => item.status === "uploading");
+  const failed = pending.some((item) => item.status === "failed");
+  const readyIds = pending.flatMap((item) => item.attachment ? [item.attachment.id] : []);
+  const canSend = !blocked && !uploading && !failed && (Boolean(draft.trim()) || readyIds.length > 0);
 
   useLayoutEffect(() => {
     const element = textarea.current;
@@ -50,19 +60,53 @@ export function Composer({ chatId, threadId, messages, disabled = false, focusOn
   }
 
   async function send() {
-    if (blocked || !draft.trim()) return;
+    if (!canSend) return;
     const sent = draft;
+    const attachmentIds = readyIds;
+    const ok = await streamStore.send({ chatId, threadId, content: sent.trim(), modelKey: model, ...(attachmentIds.length ? { attachmentIds } : {}) });
+    if (!ok) return;
     // Only clear the draft the user actually sent; a newer draft typed meanwhile is kept.
-    if (await streamStore.send({ chatId, threadId, content: sent.trim(), modelKey: model }) && drafts.get(scope) === sent) changeDraft("");
+    if (drafts.get(scope) === sent) changeDraft("");
+    if (attachmentIds.length) attachmentStore.clear(scope);
+  }
+
+  async function attach(files: Iterable<File>) {
+    if (blocked) return;
+    const skipped = await attachmentStore.add(scope, chatId, files);
+    setAttachNote(skipped > 0 ? `Up to ${MAX_ATTACHMENTS_PER_MESSAGE} images per message; ${skipped} skipped.` : null);
+  }
+
+  function droppedFiles(transfer: DataTransfer | null): File[] {
+    return transfer ? [...transfer.files].filter(isImageFile) : [];
   }
 
   return (
     <div className={`composer-wrap ${threadId ? "thread-composer-wrap" : "main-composer-wrap"}`}>
-      <div className="composer">
+      <div className={`composer ${dragging ? "composer-dragging" : ""}`}
+        onDragOver={(event) => { if (droppedFiles(event.dataTransfer).length || event.dataTransfer.types.includes("Files")) { event.preventDefault(); setDragging(true); } }}
+        onDragLeave={() => setDragging(false)}
+        onDrop={(event) => {
+          const files = droppedFiles(event.dataTransfer);
+          setDragging(false);
+          if (files.length) { event.preventDefault(); void attach(files); }
+        }}>
+        {pending.length > 0 && <ul className="attachment-strip" aria-label="Attached images">
+          {pending.map((item) => <li key={item.localId} className={`attachment-chip attachment-${item.status}`} title={item.error ?? item.name}>
+            {/* eslint-disable-next-line @next/next/no-img-element -- local object URL preview */}
+            <img src={item.previewUrl} alt="" />
+            {item.status === "uploading" && <span className="attachment-state"><Loader2 size={14} className="spin" /></span>}
+            {item.status === "failed" && <span className="attachment-state attachment-error" role="alert">{item.error}</span>}
+            <button type="button" className="attachment-remove" aria-label={`Remove ${item.name}`} onClick={() => attachmentStore.remove(scope, item.localId)}><X size={12} /></button>
+          </li>)}
+        </ul>}
         <textarea ref={textarea} aria-label={threadId ? "Thread message" : "Main message"} data-testid={threadId ? "thread-composer" : "main-composer"}
           placeholder={threadId ? "Ask about this passage…" : "Continue the conversation…"}
           value={draft} rows={2} maxLength={100000}
           onChange={(event) => changeDraft(event.target.value)}
+          onPaste={(event) => {
+            const files = [...event.clipboardData.items].flatMap((item) => item.kind === "file" ? [item.getAsFile()] : []).filter((file): file is File => file !== null && isImageFile(file));
+            if (files.length) { event.preventDefault(); void attach(files); }
+          }}
           onKeyDown={(event) => {
             if (event.key === "Enter" && !event.shiftKey) {
               event.preventDefault();
@@ -70,6 +114,10 @@ export function Composer({ chatId, threadId, messages, disabled = false, focusOn
             }
           }} />
         <div className="composer-controls">
+          <input ref={fileInput} type="file" accept="image/*" multiple hidden data-testid={threadId ? "thread-attach-input" : "main-attach-input"}
+            onChange={(event) => { if (event.target.files) void attach(event.target.files); event.target.value = ""; }} />
+          <Button variant="ghost" size="icon" className="attach-button" aria-label="Attach image" title={modelFor(model).vision ? "Attach image" : `Attach image (${modelFor(model).label} reads a detailed description of it)`}
+            disabled={blocked || pending.length >= MAX_ATTACHMENTS_PER_MESSAGE} onClick={() => fileInput.current?.click()}><ImagePlus size={16} /></Button>
           <Select value={model} onValueChange={(value) => { if (isModelKey(value)) setModel(value); }} disabled={blocked}>
             <SelectTrigger aria-label={threadId ? "Thread model" : "Main model"} data-testid={threadId ? "thread-model" : "main-model"} className="model-pill">
               {model === "thinking" ? <Brain size={12} /> : null}
@@ -92,12 +140,12 @@ export function Composer({ chatId, threadId, messages, disabled = false, focusOn
           <div className="send-controls">
             {ownActive ? <Button variant="secondary" size="sm" onClick={() => void streamStore.stop(chatId, threadId)} aria-label="Stop generation" className="stop-button"><Square size={12} fill="currentColor" />Stop</Button> : <>
               <span className="send-hint"><kbd>Enter</kbd></span>
-              <Button size="icon" className="send-button" aria-label={threadId ? "Send thread message" : "Send main message"} disabled={blocked || !draft.trim()} onClick={() => void send()}><ArrowUp /></Button>
+              <Button size="icon" className="send-button" aria-label={threadId ? "Send thread message" : "Send main message"} disabled={!canSend} onClick={() => void send()}><ArrowUp /></Button>
             </>}
           </div>
         </div>
       </div>
-      <p className="composer-note">{streams.operation ?? (threadId ? "This conversation stays in its thread." : "Select a passage in an answer to open a thread.")}</p>
+      <p className="composer-note">{streams.operation ?? attachNote ?? (uploading ? "Uploading images…" : threadId ? "This conversation stays in its thread." : "Select a passage in an answer to open a thread.")}</p>
     </div>
   );
 }

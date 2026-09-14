@@ -1,13 +1,32 @@
+import type { AssistantModelMessage, UserModelMessage } from "ai";
 import { AppError } from "../errors";
 import type { PromptMessage } from "../types";
+import { attachmentText } from "../vision";
 import type { ProviderChunk } from "./types";
 
+/**
+ * Converts prompt messages to AI SDK model messages. A user turn with native `images` becomes
+ * text + image parts; any other turn with attachments gets their cached descriptions appended as text,
+ * so a model without vision (or an older turn) still knows exactly what the image contained.
+ */
 export function sdkPrompt(messages: PromptMessage[]) {
   const firstConversation = messages.findIndex((message) => message.role !== "system");
   const split = firstConversation < 0 ? messages.length : firstConversation;
   return {
     system: messages.slice(0, split).map(({ content }) => ({ role: "system" as const, content })),
-    messages: messages.slice(split).map(({ role, content }) => ({ role: role === "assistant" ? "assistant" as const : "user" as const, content })),
+    messages: messages.slice(split).map((message): UserModelMessage | AssistantModelMessage => {
+      if (message.role === "assistant") return { role: "assistant", content: message.content };
+      if (message.images?.length) {
+        return {
+          role: "user",
+          content: [
+            { type: "text", text: attachmentText(message.content, message.attachments ?? [], "native") },
+            ...message.images.map((image) => ({ type: "image" as const, image: image.data, mediaType: image.mediaType })),
+          ],
+        };
+      }
+      return { role: "user", content: message.attachments?.length ? attachmentText(message.content, message.attachments, "digest") : message.content };
+    }),
   };
 }
 

@@ -40,7 +40,15 @@ const MessageCard = memo(function MessageCard({ message, threads, activeThreadId
         </div>
       </header>
       <div className="message-body">
-        <Markdown content={message.content} anchors={anchors} activeThreadId={activeThreadId} onOpenThread={onOpenThread} streaming={streaming} selectable={selectable} />
+        {message.attachments && message.attachments.length > 0 && <ul className="message-attachments" aria-label="Attached images">
+          {message.attachments.map((attachment) => <li key={attachment.id}>
+            <a href={`/api/attachments/${encodeURIComponent(attachment.id)}`} target="_blank" rel="noreferrer" title={`${attachment.name} (${attachment.width}×${attachment.height})`}>
+              {/* eslint-disable-next-line @next/next/no-img-element -- owner-scoped API image, not a static asset */}
+              <img src={`/api/attachments/${encodeURIComponent(attachment.id)}`} alt={attachment.name} width={attachment.width} height={attachment.height} loading="lazy" decoding="async" />
+            </a>
+          </li>)}
+        </ul>}
+        {(message.role !== "user" || message.content.trim() !== "") && <Markdown content={message.content} anchors={anchors} activeThreadId={activeThreadId} onOpenThread={onOpenThread} streaming={streaming} selectable={selectable} />}
         {streaming && <span className="sr-only" role="status">Writing an answer</span>}
         {!message.complete && !streaming && <div className="stopped-state" role="status">
           <Pause size={14} />

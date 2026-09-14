@@ -3,10 +3,15 @@ import type { Briefing, Message, PromptMessage, Thread } from "./types";
 
 export const MAIN_SYSTEM_PROMPT = "You are a thoughtful, precise assistant. Answer the user's request directly, and use Markdown where it improves clarity. For math, use $...$ for inline expressions and $$ delimiters on separate lines for display equations, never \\(...\\) or \\[...\\].";
 
+/** Persisted message → prompt turn. Attachment metadata rides along; bytes/digests are resolved at generation time. */
+function turn({ role, content, attachments }: Message): PromptMessage {
+  return attachments?.length ? { role, content, attachments } : { role, content };
+}
+
 export function assembleMainPrompt(messages: Message[]): PromptMessage[] {
   return [
     { role: "system", content: MAIN_SYSTEM_PROMPT },
-    ...messages.filter((message) => message.threadId === null).map(({ role, content }) => ({ role, content })),
+    ...messages.filter((message) => message.threadId === null).map(turn),
   ];
 }
 
@@ -33,8 +38,7 @@ function frozenContext(value: string | null): string {
 function threadConversation(thread: Thread, history: Message[]): PromptMessage[] {
   return [
     { role: "system", content: `Thread subject:\n${thread.anchorExact}` },
-    ...history.filter((message) => message.threadId === thread.id && message.chatId === thread.chatId)
-      .map(({ role, content }) => ({ role, content })),
+    ...history.filter((message) => message.threadId === thread.id && message.chatId === thread.chatId).map(turn),
   ];
 }
 

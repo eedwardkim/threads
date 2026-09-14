@@ -4,9 +4,10 @@ import type { GenerationStore } from "./db/jobs";
 import type { ChatRepository } from "./db/repository";
 import { AppError } from "./errors";
 import { assembleFullThreadPrompt, assembleThreadPrompt } from "./prompts";
-import { compress } from "./provider";
+import { compress, digestWriter, getProviderStatus } from "./provider";
 import { estimateTokens } from "./tokens";
-import type { FrozenContext, Message, Thread, ThreadData } from "./types";
+import type { FrozenContext, Message, PromptMessage, Thread, ThreadData } from "./types";
+import { attachmentText, resolvePromptAttachments } from "./vision";
 
 export interface CreateThreadInput {
   parentMessageId: string;
@@ -65,12 +66,24 @@ function mainMessages(repository: ChatRepository, chatId: string): Promise<Messa
  * Compresses the main conversation into a briefing with a bounded timeout. Timeouts and provider
  * failures fall back to the last few messages; only an explicit stop propagates as cancellation.
  */
-async function prepareContext(main: Message[], parentId: string, signal: AbortSignal): Promise<FrozenContext> {
+async function prepareContext(repository: ChatRepository, main: Message[], parentId: string, signal: AbortSignal): Promise<FrozenContext> {
   throwIfAborted(signal);
   const bounded = AbortSignal.any([signal, AbortSignal.timeout(compressionTimeoutMs())]);
+  const turns: PromptMessage[] = main.map(({ role, content, attachments }) => attachments?.length ? { role, content, attachments } : { role, content });
+  // Frozen context is text: images are represented by their cached digests (written now if missing).
+  try {
+    await resolvePromptAttachments({
+      prompt: turns, modelKey: "fast", status: getProviderStatus(), signal: bounded, forceDigest: true, writer: digestWriter,
+      load: (ids) => repository.loadAttachments(ids),
+      save: (id, digest, model) => repository.saveAttachmentDigest(id, digest, model),
+    });
+  } catch {
+    throwIfAborted(signal);
+  }
+  const withParent = (_turn: PromptMessage, index: number) => main[index].id !== parentId;
   try {
     const result = await raceAbort(Promise.resolve().then(() => compress({
-      messages: main.filter((message) => message.id !== parentId).map(({ role, content }) => ({ role, content })),
+      messages: turns.filter(withParent),
       direction: "main-to-thread",
       signal: bounded,
     })), signal);
@@ -83,7 +96,10 @@ async function prepareContext(main: Message[], parentId: string, signal: AbortSi
     if (error instanceof Error && error.name === "AbortError") throw cancellation();
   }
   throwIfAborted(signal);
-  return { kind: "fallback", messages: main.slice(-4).map(({ role, content }) => ({ role, content })) };
+  return {
+    kind: "fallback",
+    messages: turns.slice(-4).map(({ role, content, attachments }) => ({ role, content: attachments?.length ? attachmentText(content, attachments, "digest") : content })),
+  };
 }
 
 /** Runs `work` under a durable context job so a stop from any instance (or a lost lease) cancels it. */
@@ -133,7 +149,7 @@ export async function createThread(input: CreateThreadInput, options: ThreadServ
   }
   return withContextJob(options, parent.chatId, null, `new:${randomUUID()}`, async (signal) => {
     const main = await mainMessages(repository, parent.chatId);
-    const context = await prepareContext(main, parent.id, signal);
+    const context = await prepareContext(repository, main, parent.id, signal);
     throwIfAborted(signal);
     return repository.insertThread({ ...input, compressedContext: JSON.stringify(context), contextFrozenAt: main.at(-1)?.createdAt ?? null });
   });
@@ -146,7 +162,7 @@ export async function refreshThreadContext(id: string, options: ThreadServiceOpt
   return withContextJob(options, thread.chatId, thread.id, "", async (signal) => {
     const parent = await requireParent(repository, thread.parentMessageId, thread.chatId);
     const [main, threadMessages] = await Promise.all([mainMessages(repository, thread.chatId), repository.listMessages(thread.chatId, thread.id)]);
-    const context = await prepareContext(main, parent.id, signal);
+    const context = await prepareContext(repository, main, parent.id, signal);
     const usageInvalidatedThrough = threadMessages.at(-1)?.createdAt ?? 0;
     throwIfAborted(signal);
     await repository.updateThread(id, {

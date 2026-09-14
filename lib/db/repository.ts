@@ -1,21 +1,39 @@
-import { randomUUID } from "node:crypto";
-import { and, asc, count, desc, eq, gt, isNull, lt, max, sql } from "drizzle-orm";
+import { createHash, randomUUID } from "node:crypto";
+import { and, asc, count, desc, eq, gt, inArray, isNull, lt, max, sql } from "drizzle-orm";
 import { alias, type PgColumn } from "drizzle-orm/pg-core";
 import { validateAnchor } from "../anchors";
 import { AppError } from "../errors";
+import { MAX_ATTACHMENTS_PER_MESSAGE } from "../attachments/image";
 import { isModelKey } from "../models";
-import type { Chat, Folder, Message, SearchResult, Thread } from "../types";
+import type { Attachment, AttachmentMediaType, Chat, Folder, Message, SearchResult, Thread } from "../types";
 import type { DatabaseHandle } from "./client";
-import { chats, folders, messages, threads, userState } from "./schema";
+import { attachments, chats, folders, messages, threads, userState } from "./schema";
 import { withUser, type Tx } from "./session";
 
 export type AppendMessageInput = Pick<Message, "chatId" | "threadId" | "role" | "content" | "modelKey">
-  & Partial<Pick<Message, "complete" | "createdAt">>;
+  & Partial<Pick<Message, "complete" | "createdAt">> & { attachmentIds?: string[] };
 export type FinishMessageInput = Pick<Message, "content" | "complete">
   & Partial<Pick<Message, "inputTokens" | "outputTokens">>;
 export type InsertThreadInput = Pick<Thread, "parentMessageId" | "anchorStart" | "anchorEnd" | "source" | "compressedContext" | "contextFrozenAt">
   & Partial<Pick<Thread, "title" | "createdAt">>;
 export type UpdateThreadInput = Partial<Pick<Thread, "resolved" | "title" | "compressedContext" | "contextFrozenAt">>;
+export interface CreateAttachmentInput {
+  chatId: string;
+  name: string;
+  mediaType: AttachmentMediaType;
+  width: number;
+  height: number;
+  data: Uint8Array;
+}
+/** Attachment metadata plus its bytes, for prompts and the image route. */
+export interface AttachmentFile extends Attachment {
+  chatId: string;
+  messageId: string | null;
+  data: Uint8Array;
+}
+
+/** Uploads that were never sent are dropped after this long. */
+export const PENDING_ATTACHMENT_TTL_MS = 24 * 60 * 60 * 1000;
 
 export interface DemoCatalogFolder {
   key: string;
@@ -50,6 +68,12 @@ export interface DemoHydrationPlan {
 }
 
 type MessageRow = typeof messages.$inferSelect;
+type AttachmentRow = typeof attachments.$inferSelect;
+const attachmentMeta = {
+  id: attachments.id, messageId: attachments.messageId, name: attachments.name, mediaType: attachments.mediaType, width: attachments.width,
+  height: attachments.height, byteSize: attachments.byteSize, digest: attachments.digest, createdAt: attachments.createdAt,
+};
+type AttachmentMetaRow = Pick<AttachmentRow, keyof typeof attachmentMeta>;
 type ThreadRow = { thread: typeof threads.$inferSelect; parentContent: string | null; messageCount: number };
 type OrderedTable = typeof chats | typeof messages | typeof threads;
 
@@ -85,6 +109,26 @@ export function toMessage(row: MessageRow): Message {
     id: row.id, chatId: row.chatId, threadId: row.threadId, role: row.role, content: row.content, modelKey: row.modelKey,
     complete: row.complete, inputTokens: row.inputTokens, outputTokens: row.outputTokens, createdAt: row.createdAt,
   };
+}
+
+function toAttachment(row: AttachmentMetaRow): Attachment {
+  return { id: row.id, name: row.name, mediaType: row.mediaType, width: row.width, height: row.height, byteSize: row.byteSize, digest: row.digest };
+}
+
+/** Adds `attachments` only to messages that have some, so plain messages keep their shape. */
+function withAttachments(list: Message[], rows: AttachmentMetaRow[]): Message[] {
+  if (rows.length === 0) return list;
+  const byMessage = new Map<string, Attachment[]>();
+  for (const row of rows) {
+    if (!row.messageId) continue;
+    const bucket = byMessage.get(row.messageId) ?? [];
+    bucket.push(toAttachment(row));
+    byMessage.set(row.messageId, bucket);
+  }
+  return list.map((message) => {
+    const found = byMessage.get(message.id);
+    return found ? { ...message, attachments: found } : message;
+  });
 }
 
 function enrichThread(row: ThreadRow): Thread {
@@ -234,21 +278,79 @@ export class ChatRepository {
   }
 
   async getMessage(id: string, tx?: Tx): Promise<Message | null> {
-    const row = tx ? await this.messageRow(tx, id) : await this.run((db) => this.messageRow(db, id));
-    return row ? toMessage(row) : null;
+    const query = async (db: Tx) => {
+      const row = await this.messageRow(db, id);
+      if (!row) return null;
+      const files = await db.select(attachmentMeta).from(attachments).where(and(this.owned(attachments), eq(attachments.messageId, id)))
+        .orderBy(asc(attachments.createdAt), asc(attachments.id));
+      return withAttachments([toMessage(row)], files)[0];
+    };
+    return tx ? query(tx) : this.run(query);
   }
 
   async listMessages(chatId: string, threadId: string | null = null, tx?: Tx): Promise<Message[]> {
     const query = async (db: Tx) => {
       if (threadId !== null) await this.requireThreadScope(db, chatId, threadId);
-      return db.select().from(messages).where(and(
+      const rows = await db.select().from(messages).where(and(
         this.owned(messages),
         eq(messages.chatId, chatId),
         threadId === null ? isNull(messages.threadId) : eq(messages.threadId, threadId),
       )).orderBy(asc(messages.createdAt), asc(messages.id));
+      const files = await db.select(attachmentMeta).from(attachments)
+        .innerJoin(messages, eq(attachments.messageId, messages.id))
+        .where(and(
+          this.owned(attachments), eq(attachments.chatId, chatId),
+          threadId === null ? isNull(messages.threadId) : eq(messages.threadId, threadId),
+        )).orderBy(asc(attachments.createdAt), asc(attachments.id));
+      return withAttachments(rows.map(toMessage), files);
     };
-    const rows = tx ? await query(tx) : await this.run(query);
-    return rows.map(toMessage);
+    return tx ? query(tx) : this.run(query);
+  }
+
+  /** Stores an uploaded image in the composer's chat, unattached until the message is sent. */
+  async createAttachment(input: CreateAttachmentInput): Promise<Attachment> {
+    return this.run(async (tx) => {
+      const chat = await tx.select({ id: chats.id }).from(chats).where(and(eq(chats.id, input.chatId), this.owned(chats)));
+      if (chat.length === 0) throw new AppError("Chat not found.", 404, "chat_not_found");
+      const now = Date.now();
+      await tx.delete(attachments).where(and(this.owned(attachments), isNull(attachments.messageId), lt(attachments.createdAt, now - PENDING_ATTACHMENT_TTL_MS)));
+      const [row] = await tx.insert(attachments).values({
+        id: randomUUID(), ownerId: this.userId, chatId: input.chatId, messageId: null, name: input.name, mediaType: input.mediaType,
+        width: input.width, height: input.height, byteSize: input.data.byteLength, sha256: createHash("sha256").update(input.data).digest("hex"),
+        data: input.data, digest: null, digestModel: null, createdAt: now,
+      }).returning(attachmentMeta);
+      return toAttachment(row);
+    });
+  }
+
+  async getAttachment(id: string): Promise<AttachmentFile | null> {
+    return this.run(async (tx) => {
+      const [row] = await tx.select().from(attachments).where(and(eq(attachments.id, id), this.owned(attachments)));
+      return row ? { ...toAttachment(row), chatId: row.chatId, messageId: row.messageId, data: row.data } : null;
+    });
+  }
+
+  async loadAttachments(ids: string[]): Promise<AttachmentFile[]> {
+    if (ids.length === 0) return [];
+    return this.run(async (tx) => {
+      const rows = await tx.select().from(attachments).where(and(this.owned(attachments), inArray(attachments.id, ids)));
+      const byId = new Map(rows.map((row) => [row.id, { ...toAttachment(row), chatId: row.chatId, messageId: row.messageId, data: row.data }]));
+      return ids.flatMap((id) => byId.get(id) ?? []);
+    });
+  }
+
+  /** Removes an upload that has not been sent yet. Attached images live and die with their message. */
+  async deleteAttachment(id: string): Promise<boolean> {
+    return this.run(async (tx) => {
+      const deleted = await tx.delete(attachments).where(and(eq(attachments.id, id), this.owned(attachments), isNull(attachments.messageId))).returning({ id: attachments.id });
+      return deleted.length > 0;
+    });
+  }
+
+  /** Caches the one-time visual description; the model that wrote it is recorded for later audits. */
+  async saveAttachmentDigest(id: string, digest: string, digestModel: string): Promise<void> {
+    if (typeof digest !== "string" || !digest.trim()) throw new AppError("A digest is required.");
+    await this.run((tx) => tx.update(attachments).set({ digest, digestModel }).where(and(eq(attachments.id, id), this.owned(attachments))));
   }
 
   async hasMessages(chatId: string, tx?: Tx): Promise<boolean> {
@@ -555,11 +657,24 @@ export class ChatRepository {
       modelKey: input.modelKey, complete: input.complete ?? true, inputTokens: null, outputTokens: null,
       createdAt: await this.nextCreatedAt(tx, messages, input.createdAt, preserveTimestamp),
     }).returning();
-    if (firstMainUser && chat.title === "New chat") {
+    const title = input.content.trim() ? input.content.slice(0, 60) : input.attachmentIds?.length ? "Image" : "";
+    if (firstMainUser && chat.title === "New chat" && title) {
       // Conditional update keeps a concurrent custom rename authoritative.
-      await tx.update(chats).set({ title: input.content.slice(0, 60) }).where(and(eq(chats.id, input.chatId), this.owned(chats), eq(chats.title, "New chat")));
+      await tx.update(chats).set({ title }).where(and(eq(chats.id, input.chatId), this.owned(chats), eq(chats.title, "New chat")));
     }
-    return toMessage(row);
+    const message = toMessage(row);
+    if (!input.attachmentIds?.length) return message;
+    if (input.role !== "user") throw new AppError("Only user messages carry attachments.");
+    const ids = [...new Set(input.attachmentIds)];
+    if (ids.length > MAX_ATTACHMENTS_PER_MESSAGE) throw new AppError(`Attach at most ${MAX_ATTACHMENTS_PER_MESSAGE} images per message.`, 400, "too_many_attachments");
+    // Only this chat's pending uploads can be claimed; ids from other chats or owners are simply not found.
+    const claimed = await tx.update(attachments).set({ messageId: message.id }).where(and(
+      this.owned(attachments), inArray(attachments.id, ids), eq(attachments.chatId, input.chatId), isNull(attachments.messageId),
+    )).returning(attachmentMeta);
+    if (claimed.length !== ids.length) throw new AppError("An attached image is missing. Remove it and try again.", 404, "attachment_not_found");
+    // Display order is upload order, matching the composer strip and later listings.
+    claimed.sort((a, b) => a.createdAt - b.createdAt || a.id.localeCompare(b.id));
+    return { ...message, attachments: claimed.map(toAttachment) };
   }
 
   private threadQuery(tx: Tx) {

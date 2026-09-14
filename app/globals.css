@@ -242,6 +242,26 @@ body { overflow: hidden; }
 .stop-button { font-size: 10px; gap: 5px; }
 .stop-button svg { width: 10px; height: 10px; }
 .composer-note { font-size: 9px; text-align: center; color: var(--muted-foreground); margin: 7px 0 0; line-height: 1.4; }
+.composer-controls { gap: 6px; }
+.send-controls { margin-left: auto; }
+.attach-button { width: 26px; height: 26px; color: var(--muted-foreground); }
+.attach-button:hover { color: var(--foreground); }
+.composer-dragging { border-color: var(--primary); box-shadow: 0 0 0 3px color-mix(in srgb, var(--primary) 20%, transparent); }
+.attachment-strip { display: flex; flex-wrap: wrap; gap: 8px; margin: 0; padding: 10px 14px 0; list-style: none; }
+.attachment-chip { position: relative; width: 64px; height: 64px; border-radius: 8px; overflow: hidden; border: 1px solid var(--border); background: var(--muted); }
+.attachment-chip img { display: block; width: 100%; height: 100%; object-fit: cover; }
+.attachment-uploading img { opacity: .45; }
+.attachment-failed { border-color: #d14343; }
+.attachment-failed img { opacity: .3; }
+.attachment-state { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; padding: 4px; font-size: 8px; line-height: 1.25; text-align: center; color: var(--foreground); }
+.attachment-error { color: #d14343; overflow: hidden; }
+.attachment-remove { position: absolute; top: 3px; right: 3px; display: flex; align-items: center; justify-content: center; width: 18px; height: 18px; border-radius: 999px; background: color-mix(in srgb, var(--background) 85%, transparent); color: var(--foreground); border: 1px solid var(--border); }
+.attachment-remove:hover { background: var(--background); }
+.spin { animation: spin 1s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+.message-attachments { display: flex; flex-wrap: wrap; gap: 8px; margin: 0 0 8px; padding: 0; list-style: none; }
+.message-attachments li { max-width: min(100%, 320px); }
+.message-attachments img { display: block; width: auto; max-width: 100%; height: auto; max-height: 240px; border-radius: 8px; border: 1px solid var(--border); background: var(--muted); }
 .empty-conversation { flex: 1; display: flex; min-height: 0; flex-direction: column; align-items: center; justify-content: center; padding: 24px 16px; text-align: center; }
 .empty-conversation > svg { color: var(--primary); }
 .empty-conversation h2 { font-size: 20px; font-weight: 500; letter-spacing: -.4px; margin: 18px 0 8px; }
